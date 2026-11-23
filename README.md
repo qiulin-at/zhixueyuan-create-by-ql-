@@ -37,7 +37,7 @@
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
-│       ├── views/            # 登录、课程列表、课程详情、AI 助手、学习报告、职位、后台管理
+│       ├── views/            # 登录、课程列表、课程详情、AI 助手、学习报告、职位、后台管理、个人中心
 │       ├── layouts/          # 顶栏布局
 │       ├── api/              # Axios 封装
 │       └── stores/           # Pinia 用户态
@@ -51,7 +51,8 @@
 ```bash
 cd backend
 ../.venv/Scripts/python.exe seed.py                 # 初始化演示数据（Windows）
-../.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000
+../.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
+# 开发时可临时加 --reload；演示/验证请用 run.bat（无 reload，改代码后需重启）
 ```
 
 Windows 也可以直接双击 `backend/run.bat`（或在项目根执行 `.\backend\run.bat`）：脚本会自动切到 `backend/`、用 `.venv` 启动 8000 端口，并在缺虚拟环境或端口被占用时给出提示。
@@ -140,8 +141,8 @@ cd backend
 ## 后续迭代建议（对应指导书 P1/P2）
 
 1. 评论/问答社区（回复、点赞）、SSE 实时通知（当前通知为 60s 轮询）
-2. 订单支付流程与个人中心订单展示
-3. Dancer/SSE 流式输出、RAG 课程资料检索与引用
+2. 订单支付流程（当前仅展示订单，未接支付通道）
+3. SSE 流式输出、RAG 课程资料检索与引用
 4. Docker Compose 一键部署 + Nginx 反向代理
 5. 移动端响应式适配（Element Plus 栅格 + 媒体查询）
 
