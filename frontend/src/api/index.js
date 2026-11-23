@@ -51,6 +51,7 @@ export const userApi = {
   update: (payload) => api.put('/users/me', payload),
   favorites: () => api.get('/users/me/favorites'),
   learning: () => api.get('/users/me/learning'),
+  orders: () => api.get('/users/me/orders'),
 }
 
 export const courseApi = {
@@ -86,6 +87,7 @@ export const adminApi = {
   stats: () => api.get('/admin/stats'),
   users: (params) => api.get('/admin/users', { params }),
   updateRole: (id, role) => api.patch(`/admin/users/${id}/role`, { role }),
+  updateUserStatus: (id, isActive) => api.patch(`/admin/users/${id}/status`, { is_active: isActive }),
   courses: (params) => api.get('/admin/courses', { params }),
   updateCourseStatus: (id, status) => api.patch(`/admin/courses/${id}/status`, { status }),
   orders: (params) => api.get('/admin/orders', { params }),

@@ -179,6 +179,17 @@ const changeCourseStatus = async (row, value) => {
   }
 }
 
+const toggleUserStatus = async (row) => {
+  const next = !row.is_active
+  try {
+    await adminApi.updateUserStatus(row.id, next)
+    row.is_active = next
+    ElMessage.success(`${row.nickname || row.username} 已${next ? '启用' : '停用'}`)
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
 const changeUserRole = async (row, value) => {
   if (value === row.role) return
   const previous = row.role
@@ -410,6 +421,19 @@ onMounted(async () => {
                 </el-table-column>
                 <el-table-column label="注册时间" width="132">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="92" fixed="right">
+                  <template #default="{ row }">
+                    <el-button
+                      link
+                      size="small"
+                      :type="row.is_active ? 'danger' : 'success'"
+                      :disabled="row.id === userStore.user?.id"
+                      @click="toggleUserStatus(row)"
+                    >
+                      {{ row.is_active ? '停用' : '启用' }}
+                    </el-button>
+                  </template>
                 </el-table-column>
                 <template #empty>
                   <div class="table-empty">没有匹配的用户</div>

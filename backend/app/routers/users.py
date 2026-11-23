@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db
-from ..models import Course, Favorite, LearningRecord, User
+from ..models import Course, Favorite, LearningRecord, Order, User
 from ..schemas import UserOut, UserUpdateIn
 from ..security import hash_password
 from ..utils import ok
@@ -90,5 +90,36 @@ def list_learning(current: User = Depends(get_current_user), db: Session = Depen
             "total": len(items),
             "total_minutes": total_minutes,
             "avg_progress": round(sum(item["progress"] for item in items) / len(items)) if items else 0,
+        }
+    )
+
+
+@router.get("/me/orders")
+def list_orders(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = (
+        db.query(Order, Course)
+        .join(Course, Order.course_id == Course.id)
+        .filter(Order.user_id == current.id)
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+    items = [
+        {
+            "id": order.id,
+            "order_no": order.order_no,
+            "course_id": course.id,
+            "title": course.title,
+            "cover": course.cover,
+            "amount": round(float(order.amount), 2),
+            "status": order.status,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+        }
+        for order, course in rows
+    ]
+    return ok(
+        {
+            "items": items,
+            "total": len(items),
+            "total_amount": round(sum(item["amount"] for item in items), 2),
         }
     )

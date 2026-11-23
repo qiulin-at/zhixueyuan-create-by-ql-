@@ -43,6 +43,10 @@ const handleCommand = (command) => {
     router.push('/admin')
     return
   }
+  if (command === 'profile') {
+    router.push('/profile')
+    return
+  }
   router.push(command === 'ai' ? '/ai' : '/report')
 }
 
@@ -235,6 +239,7 @@ onBeforeUnmount(() => {
                 <el-dropdown-menu>
                   <el-dropdown-item command="ai">AI 学习助手</el-dropdown-item>
                   <el-dropdown-item command="report">学习报告</el-dropdown-item>
+                  <el-dropdown-item command="profile">个人中心</el-dropdown-item>
                   <el-dropdown-item v-if="canManage" command="admin">后台管理</el-dropdown-item>
                   <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
                 </el-dropdown-menu>

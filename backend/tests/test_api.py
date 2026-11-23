@@ -527,3 +527,36 @@ def test_invalid_token_and_unknown_account(client):
     bad_headers = {"Authorization": "Bearer not-a-real-token"}
     assert client.get("/api/users/me", headers=bad_headers).status_code == 401
     assert client.post("/api/auth/login", json={"account": "no_such_user", "password": "123456"}).status_code == 401
+
+
+def test_my_orders(client):
+    headers = auth(login(client))
+    data = client.get("/api/users/me/orders", headers=headers).json()["data"]
+    assert data["total"] >= 1
+    item = data["items"][0]
+    assert {"order_no", "title", "amount", "status"} <= set(item)
+    assert data["total_amount"] >= item["amount"]
+
+
+def test_admin_cannot_update_own_status(client):
+    admin = auth(login(client, "admin"))
+    me = client.get("/api/users/me", headers=admin).json()["data"]
+    response = client.patch(f"/api/admin/users/{me['id']}/status", json={"is_active": False}, headers=admin)
+    assert response.status_code == 400
+
+
+def test_admin_disable_user_blocks_login(client):
+    admin = auth(login(client, "admin"))
+    student = auth(login(client))
+    me = client.get("/api/users/me", headers=student).json()["data"]
+
+    disabled = client.patch(f"/api/admin/users/{me['id']}/status", json={"is_active": False}, headers=admin)
+    assert disabled.json()["data"]["is_active"] is False
+    try:
+        blocked = client.post("/api/auth/login", json={"account": "student", "password": "123456"})
+        assert blocked.status_code == 403
+    finally:
+        restored = client.patch(f"/api/admin/users/{me['id']}/status", json={"is_active": True}, headers=admin)
+        assert restored.json()["data"]["is_active"] is True
+
+    assert client.post("/api/auth/login", json={"account": "student", "password": "123456"}).status_code == 200

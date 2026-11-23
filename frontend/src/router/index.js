@@ -21,6 +21,12 @@ const routes = [
         component: () => import('../views/ReportView.vue'),
         meta: { auth: true },
       },
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('../views/ProfileView.vue'),
+        meta: { auth: true },
+      },
       { path: 'jobs', name: 'jobs', component: () => import('../views/JobListView.vue') },
       {
         path: 'admin',

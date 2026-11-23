@@ -84,5 +84,9 @@ class RoleIn(BaseModel):
     role: str = Field(pattern="^(student|teacher|admin)$")
 
 
+class UserStatusIn(BaseModel):
+    is_active: bool
+
+
 class CourseStatusIn(BaseModel):
     status: str = Field(pattern="^(draft|published|offline)$")

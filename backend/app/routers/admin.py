@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..deps import get_db, require_role
 from ..models import Comment, Course, Favorite, Job, JobApplication, LearningRecord, Order, User
-from ..schemas import CourseStatusIn, RoleIn
+from ..schemas import CourseStatusIn, RoleIn, UserStatusIn
 from ..services.notifications import notify_course_offline
 from ..utils import ok, paginated
 
@@ -57,6 +57,27 @@ def update_role(
     db.add(user)
     db.commit()
     return ok({"id": user.id, "role": user.role}, message="角色已更新")
+
+
+@router.patch("/users/{user_id}/status")
+def update_user_status(
+    user_id: int,
+    payload: UserStatusIn,
+    current: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    if user_id == current.id:
+        raise HTTPException(status_code=400, detail="不能停用自己的账号")
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    user.is_active = 1 if payload.is_active else 0
+    db.add(user)
+    db.commit()
+    return ok(
+        {"id": user.id, "is_active": bool(user.is_active)},
+        message="账号已启用" if payload.is_active else "账号已停用",
+    )
 
 
 @router.get("/courses")
