@@ -560,3 +560,117 @@ def test_admin_disable_user_blocks_login(client):
         assert restored.json()["data"]["is_active"] is True
 
     assert client.post("/api/auth/login", json={"account": "student", "password": "123456"}).status_code == 200
+
+
+def test_admin_course_crud(client):
+    admin = auth(login(client, "admin"))
+
+    created = client.post(
+        "/api/admin/courses",
+        json={"title": "TEST 临时课程", "tech_system": "AI", "level": "beginner", "is_free": True},
+        headers=admin,
+    ).json()
+    assert created["code"] == 0
+    course_id = created["data"]["id"]
+
+    detail = client.get(f"/api/admin/courses/{course_id}", headers=admin).json()["data"]
+    assert detail["title"] == "TEST 临时课程"
+    assert detail["chapters"] == []
+
+    updated = client.put(
+        f"/api/admin/courses/{course_id}",
+        json={"title": "TEST 临时课程改", "price": 99, "is_free": False},
+        headers=admin,
+    )
+    assert updated.json()["code"] == 0
+    detail = client.get(f"/api/admin/courses/{course_id}", headers=admin).json()["data"]
+    assert detail["title"] == "TEST 临时课程改"
+    assert detail["price"] == 99.0
+
+    chapter = client.post(
+        f"/api/admin/courses/{course_id}/chapters",
+        json={"title": "第 1 章", "duration_min": 20, "sort": 1},
+        headers=admin,
+    ).json()["data"]
+    edited = client.put(f"/api/admin/chapters/{chapter['id']}", json={"title": "第 1 章 改"}, headers=admin).json()
+    assert edited["data"]["title"] == "第 1 章 改"
+    assert client.delete(f"/api/admin/chapters/{chapter['id']}", headers=admin).status_code == 200
+
+    assert client.delete(f"/api/admin/courses/{course_id}", headers=admin).json()["code"] == 0
+    assert client.get(f"/api/admin/courses/{course_id}", headers=admin).status_code == 404
+
+
+def test_teacher_course_ownership(client):
+    teacher = auth(login(client, "teacher_wang"))
+    me = client.get("/api/users/me", headers=teacher).json()["data"]
+
+    created = client.post(
+        "/api/admin/courses", json={"title": "TEST 教师课程"}, headers=teacher
+    ).json()["data"]
+    course_id = created["id"]
+    try:
+        detail = client.get(f"/api/admin/courses/{course_id}", headers=teacher).json()["data"]
+        assert detail["teacher_id"] == me["id"]
+
+        other = auth(login(client, "teacher_li"))
+        blocked = client.put(f"/api/admin/courses/{course_id}", json={"title": "越权改名"}, headers=other)
+        assert blocked.status_code == 403
+
+        student = auth(login(client))
+        assert client.post("/api/admin/courses", json={"title": "学生课程"}, headers=student).status_code == 403
+    finally:
+        client.delete(f"/api/admin/courses/{course_id}", headers=teacher)
+
+
+def test_delete_course_with_records_blocked(client):
+    admin = auth(login(client, "admin"))
+    response = client.delete("/api/admin/courses/1", headers=admin)
+    assert response.status_code == 409
+
+
+def test_admin_teachers_list(client):
+    admin = auth(login(client, "admin"))
+    data = client.get("/api/admin/teachers", headers=admin).json()["data"]
+    assert data["total"] >= 2
+    assert all("course_count" in item for item in data["items"])
+
+    student = auth(login(client))
+    assert client.get("/api/admin/teachers", headers=student).status_code == 403
+
+
+def test_order_status_machine(client):
+    admin = auth(login(client, "admin"))
+    orders = client.get("/api/admin/orders", headers=admin).json()["data"]["items"]
+    paid = next(item for item in orders if item["status"] == "paid")
+
+    detail = client.get(f"/api/admin/orders/{paid['id']}", headers=admin).json()["data"]
+    assert detail["course_title"]
+
+    assert (
+        client.patch(
+            f"/api/admin/orders/{paid['id']}/status", json={"status": "pending"}, headers=admin
+        ).status_code
+        == 409
+    )
+    assert (
+        client.patch(
+            f"/api/admin/orders/{paid['id']}/status", json={"status": "refunded"}, headers=admin
+        ).json()["data"]["status"]
+        == "refunded"
+    )
+    assert (
+        client.patch(
+            f"/api/admin/orders/{paid['id']}/status", json={"status": "paid"}, headers=admin
+        ).status_code
+        == 409
+    )
+
+
+def test_course_payload_validation(client):
+    admin = auth(login(client, "admin"))
+    assert client.post("/api/admin/courses", json={"title": "A"}, headers=admin).status_code == 422
+    assert (
+        client.post("/api/admin/courses", json={"title": "有效课程", "level": "expert"}, headers=admin).status_code
+        == 422
+    )
+    assert client.get("/api/admin/orders/999999", headers=admin).status_code == 404

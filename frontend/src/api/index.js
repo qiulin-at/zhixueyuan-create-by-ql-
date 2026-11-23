@@ -89,8 +89,18 @@ export const adminApi = {
   updateRole: (id, role) => api.patch(`/admin/users/${id}/role`, { role }),
   updateUserStatus: (id, isActive) => api.patch(`/admin/users/${id}/status`, { is_active: isActive }),
   courses: (params) => api.get('/admin/courses', { params }),
+  courseDetail: (id) => api.get(`/admin/courses/${id}`),
+  createCourse: (payload) => api.post('/admin/courses', payload),
+  updateCourse: (id, payload) => api.put(`/admin/courses/${id}`, payload),
+  deleteCourse: (id) => api.delete(`/admin/courses/${id}`),
+  createChapter: (id, payload) => api.post(`/admin/courses/${id}/chapters`, payload),
+  updateChapter: (chapterId, payload) => api.put(`/admin/chapters/${chapterId}`, payload),
+  deleteChapter: (chapterId) => api.delete(`/admin/chapters/${chapterId}`),
+  teachers: () => api.get('/admin/teachers'),
   updateCourseStatus: (id, status) => api.patch(`/admin/courses/${id}/status`, { status }),
   orders: (params) => api.get('/admin/orders', { params }),
+  orderDetail: (id) => api.get(`/admin/orders/${id}`),
+  updateOrderStatus: (id, status) => api.patch(`/admin/orders/${id}/status`, { status }),
   applications: (params) => api.get('/admin/applications', { params }),
 }
 

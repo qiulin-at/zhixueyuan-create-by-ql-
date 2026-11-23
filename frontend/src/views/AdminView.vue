@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Briefcase, DataLine, Reading, Refresh, Search, ShoppingCart, Star, User } from '@element-plus/icons-vue'
 import { adminApi } from '../api'
 import { useUserStore } from '../stores/user'
@@ -203,6 +203,200 @@ const changeUserRole = async (row, value) => {
   }
 }
 
+const teachers = ref([])
+const courseDialog = reactive({ visible: false, mode: 'create', id: null, saving: false })
+const courseForm = reactive({
+  title: '',
+  cover: '',
+  course_type: 'theory',
+  tech_system: '',
+  tech_direction: '',
+  level: 'beginner',
+  is_free: true,
+  price: 0,
+  teacher_id: null,
+  intro: '',
+  status: 'published',
+})
+const chapterDialog = reactive({
+  visible: false,
+  courseId: null,
+  courseTitle: '',
+  items: [],
+  loading: false,
+  saving: false,
+})
+const chapterForm = reactive({ title: '', content_type: 'video', duration_min: 30, sort: 1 })
+
+const blankCourse = () => ({
+  title: '',
+  cover: '',
+  course_type: 'theory',
+  tech_system: '',
+  tech_direction: '',
+  level: 'beginner',
+  is_free: true,
+  price: 0,
+  teacher_id: null,
+  intro: '',
+  status: 'published',
+})
+
+const loadTeachers = async () => {
+  if (!isAdmin.value) return
+  try {
+    teachers.value = (await adminApi.teachers()).items
+  } catch (error) {
+    // 讲师列表失败不阻塞课程编辑
+  }
+}
+
+const openCreateCourse = () => {
+  Object.assign(courseForm, blankCourse())
+  courseDialog.mode = 'create'
+  courseDialog.id = null
+  courseDialog.visible = true
+  loadTeachers()
+}
+
+const openEditCourse = async (row) => {
+  courseDialog.mode = 'edit'
+  courseDialog.id = row.id
+  courseDialog.visible = true
+  loadTeachers()
+  try {
+    const data = await adminApi.courseDetail(row.id)
+    Object.assign(courseForm, {
+      title: data.title,
+      cover: data.cover,
+      course_type: data.course_type,
+      tech_system: data.tech_system,
+      tech_direction: data.tech_direction,
+      level: data.level,
+      is_free: data.is_free,
+      price: data.price,
+      teacher_id: data.teacher_id,
+      intro: data.intro,
+      status: data.status,
+    })
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const submitCourse = async () => {
+  if (courseForm.title.trim().length < 2) {
+    ElMessage.warning('课程名称至少 2 个字')
+    return
+  }
+  courseDialog.saving = true
+  try {
+    const payload = {
+      ...courseForm,
+      title: courseForm.title.trim(),
+      price: Number(courseForm.price) || 0,
+    }
+    if (isAdmin.value) {
+      payload.teacher_id = courseForm.teacher_id || null
+    } else {
+      delete payload.teacher_id
+    }
+    if (courseDialog.mode === 'create') {
+      await adminApi.createCourse(payload)
+      ElMessage.success('课程已创建')
+    } else {
+      await adminApi.updateCourse(courseDialog.id, payload)
+      ElMessage.success('课程已更新')
+    }
+    courseDialog.visible = false
+    await loadCourses()
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    courseDialog.saving = false
+  }
+}
+
+const removeCourse = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `删除《${row.title}》？已有学习记录或订单的课程会被拒绝。`,
+      '删除课程',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch (error) {
+    return
+  }
+  try {
+    await adminApi.deleteCourse(row.id)
+    ElMessage.success('课程已删除')
+    await loadCourses()
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const openChapters = async (row) => {
+  chapterDialog.visible = true
+  chapterDialog.courseId = row.id
+  chapterDialog.courseTitle = row.title
+  chapterDialog.loading = true
+  chapterForm.title = ''
+  try {
+    const data = await adminApi.courseDetail(row.id)
+    chapterDialog.items = data.chapters
+    chapterForm.sort = data.chapters.length + 1
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    chapterDialog.loading = false
+  }
+}
+
+const addChapter = async () => {
+  if (!chapterForm.title.trim()) {
+    ElMessage.warning('请填写章节标题')
+    return
+  }
+  chapterDialog.saving = true
+  try {
+    const chapter = await adminApi.createChapter(chapterDialog.courseId, {
+      ...chapterForm,
+      title: chapterForm.title.trim(),
+      duration_min: Number(chapterForm.duration_min) || 0,
+      sort: Number(chapterForm.sort) || 0,
+    })
+    chapterDialog.items.push(chapter)
+    chapterForm.title = ''
+    chapterForm.sort = chapterDialog.items.length + 1
+    ElMessage.success('章节已添加')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    chapterDialog.saving = false
+  }
+}
+
+const removeChapter = async (chapter) => {
+  try {
+    await adminApi.deleteChapter(chapter.id)
+    chapterDialog.items = chapterDialog.items.filter((item) => item.id !== chapter.id)
+    ElMessage.success('章节已删除')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const changeOrderStatus = async (row, status) => {
+  try {
+    await adminApi.updateOrderStatus(row.id, status)
+    row.status = status
+    ElMessage.success('订单状态已更新')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
 const refreshAll = async () => {
   await Promise.all([loadStats(), loadCourses()])
   if (isAdmin.value) {
@@ -314,6 +508,7 @@ onMounted(async () => {
                 <el-option label="草稿" value="draft" />
               </el-select>
               <el-button type="primary" class="zx-gradient-button" @click="searchCourses">查询</el-button>
+              <el-button type="primary" plain @click="openCreateCourse">新建课程</el-button>
               <span class="toolbar-tip">共 {{ courses.total }} 门</span>
             </div>
 
@@ -355,6 +550,13 @@ onMounted(async () => {
                 </el-table-column>
                 <el-table-column label="创建时间" width="132">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="164" fixed="right">
+                  <template #default="{ row }">
+                    <el-button link size="small" @click="openEditCourse(row)">编辑</el-button>
+                    <el-button link size="small" @click="openChapters(row)">章节</el-button>
+                    <el-button link size="small" type="danger" @click="removeCourse(row)">删除</el-button>
+                  </template>
                 </el-table-column>
                 <template #empty>
                   <div class="table-empty">没有符合条件的课程</div>
@@ -477,6 +679,29 @@ onMounted(async () => {
                 <el-table-column label="创建时间" width="132">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
                 </el-table-column>
+                <el-table-column label="操作" width="132" fixed="right">
+                  <template #default="{ row }">
+                    <el-button
+                      v-if="row.status === 'pending'"
+                      link
+                      size="small"
+                      type="success"
+                      @click="changeOrderStatus(row, 'paid')"
+                    >
+                      标记已支付
+                    </el-button>
+                    <el-button
+                      v-if="row.status === 'paid'"
+                      link
+                      size="small"
+                      type="warning"
+                      @click="changeOrderStatus(row, 'refunded')"
+                    >
+                      退款
+                    </el-button>
+                    <span v-if="!['pending', 'paid'].includes(row.status)">—</span>
+                  </template>
+                </el-table-column>
                 <template #empty>
                   <div class="table-empty">暂无订单数据</div>
                 </template>
@@ -531,6 +756,115 @@ onMounted(async () => {
           </el-tab-pane>
         </el-tabs>
       </section>
+
+      <el-dialog
+        v-model="courseDialog.visible"
+        :title="courseDialog.mode === 'create' ? '新建课程' : '编辑课程'"
+        width="640px"
+        destroy-on-close
+      >
+        <el-form label-width="88px" class="course-form">
+          <el-form-item label="课程名称">
+            <el-input v-model="courseForm.title" maxlength="120" placeholder="例如：Python 数据分析实战" />
+          </el-form-item>
+          <el-form-item label="封面地址">
+            <el-input v-model="courseForm.cover" maxlength="255" placeholder="https://…（可留空）" />
+          </el-form-item>
+          <div class="form-grid">
+            <el-form-item label="类型">
+              <el-select v-model="courseForm.course_type">
+                <el-option label="理论" value="theory" />
+                <el-option label="实训" value="practice" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="等级">
+              <el-select v-model="courseForm.level">
+                <el-option label="初级" value="beginner" />
+                <el-option label="中级" value="intermediate" />
+                <el-option label="高级" value="advanced" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="技术体系">
+              <el-input v-model="courseForm.tech_system" maxlength="30" placeholder="如：AI" />
+            </el-form-item>
+            <el-form-item label="技术方向">
+              <el-input v-model="courseForm.tech_direction" maxlength="30" placeholder="如：机器学习" />
+            </el-form-item>
+          </div>
+          <el-form-item label="免费">
+            <el-switch v-model="courseForm.is_free" />
+            <span class="form-hint">免费课程无需填写价格</span>
+          </el-form-item>
+          <el-form-item v-if="!courseForm.is_free" label="价格">
+            <el-input-number
+              v-model="courseForm.price"
+              :min="0"
+              :max="99999"
+              :precision="2"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item v-if="isAdmin" label="讲师">
+            <el-select v-model="courseForm.teacher_id" clearable placeholder="未指派">
+              <el-option
+                v-for="teacher in teachers"
+                :key="teacher.id"
+                :label="`${teacher.nickname || teacher.username}（${teacher.course_count} 门）`"
+                :value="teacher.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="courseForm.status">
+              <el-option label="已上架" value="published" />
+              <el-option label="已下架" value="offline" />
+              <el-option label="草稿" value="draft" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="简介">
+            <el-input v-model="courseForm.intro" type="textarea" :rows="3" maxlength="500" show-word-limit />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="courseDialog.visible = false">取消</el-button>
+          <el-button type="primary" :loading="courseDialog.saving" @click="submitCourse">保存</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog
+        v-model="chapterDialog.visible"
+        :title="`章节维护 · ${chapterDialog.courseTitle}`"
+        width="680px"
+      >
+        <div v-loading="chapterDialog.loading">
+          <el-table :data="chapterDialog.items" size="small" max-height="300">
+            <el-table-column prop="sort" label="#" width="52" />
+            <el-table-column prop="title" label="章节标题" min-width="200" />
+            <el-table-column label="时长（分）" width="100">
+              <template #default="{ row }">{{ row.duration_min }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="80">
+              <template #default="{ row }">
+                <el-button link size="small" type="danger" @click="removeChapter(row)">删除</el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <div class="table-empty">还没有章节</div>
+            </template>
+          </el-table>
+          <div class="chapter-add">
+            <el-input v-model="chapterForm.title" placeholder="新章节标题" maxlength="150" />
+            <el-input-number
+              v-model="chapterForm.duration_min"
+              :min="0"
+              :max="600"
+              controls-position="right"
+            />
+            <el-input-number v-model="chapterForm.sort" :min="0" controls-position="right" />
+            <el-button type="primary" :loading="chapterDialog.saving" @click="addChapter">添加</el-button>
+          </div>
+        </div>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -809,5 +1143,28 @@ onMounted(async () => {
   .panel {
     padding: 4px 12px 18px;
   }
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.form-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.course-form :deep(.el-select) {
+  width: 100%;
+}
+
+.chapter-add {
+  display: grid;
+  grid-template-columns: 1fr 130px 100px auto;
+  gap: 10px;
+  margin-top: 14px;
 }
 </style>

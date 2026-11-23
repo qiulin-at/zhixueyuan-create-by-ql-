@@ -88,5 +88,53 @@ class UserStatusIn(BaseModel):
     is_active: bool
 
 
+class CourseIn(BaseModel):
+    title: str = Field(min_length=2, max_length=120)
+    cover: str = Field(default="", max_length=255)
+    course_type: str = Field(default="theory", pattern="^(theory|practice)$")
+    tech_system: str = Field(default="", max_length=30)
+    tech_direction: str = Field(default="", max_length=30)
+    level: str = Field(default="beginner", pattern="^(beginner|intermediate|advanced)$")
+    is_free: bool = True
+    price: float = Field(default=0, ge=0, le=99999)
+    teacher_id: int | None = None
+    intro: str = Field(default="", max_length=500)
+    description: str = ""
+    status: str = Field(default="published", pattern="^(draft|published|offline)$")
+
+
+class CourseUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=120)
+    cover: str | None = Field(default=None, max_length=255)
+    course_type: str | None = Field(default=None, pattern="^(theory|practice)$")
+    tech_system: str | None = Field(default=None, max_length=30)
+    tech_direction: str | None = Field(default=None, max_length=30)
+    level: str | None = Field(default=None, pattern="^(beginner|intermediate|advanced)$")
+    is_free: bool | None = None
+    price: float | None = Field(default=None, ge=0, le=99999)
+    teacher_id: int | None = None
+    intro: str | None = Field(default=None, max_length=500)
+    description: str | None = None
+    status: str | None = Field(default=None, pattern="^(draft|published|offline)$")
+
+
+class ChapterIn(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+    content_type: str = Field(default="video", pattern="^(video|doc|quiz)$")
+    duration_min: int = Field(default=30, ge=0, le=600)
+    sort: int = Field(default=0, ge=0)
+
+
+class ChapterUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=150)
+    content_type: str | None = Field(default=None, pattern="^(video|doc|quiz)$")
+    duration_min: int | None = Field(default=None, ge=0, le=600)
+    sort: int | None = Field(default=None, ge=0)
+
+
+class OrderStatusIn(BaseModel):
+    status: str = Field(pattern="^(pending|paid|refunded|cancelled)$")
+
+
 class CourseStatusIn(BaseModel):
     status: str = Field(pattern="^(draft|published|offline)$")
