@@ -1,0 +1,10 @@
+# 本地桥 token，禁止提交
+bridge/.token
+
+# Python
+__pycache__/
+*.pyc
+
+# 截图产物
+*.png
+!extension/*.png

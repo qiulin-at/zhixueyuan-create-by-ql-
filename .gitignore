@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+backend/.env
+backend/*.db
+backend/tests/*.db
+backend/logs/
+
+node_modules/
+frontend/dist/
+npm-debug.log*
+
+.codeartsdoer/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+# 测试覆盖率产物
+backend/.coverage
+backend/coverage.xml
+backend/htmlcov/
+
+# 本地智能体工作目录（不参与交付）
+.workbuddy/

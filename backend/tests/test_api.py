@@ -1,0 +1,529 @@
+import uuid
+
+from conftest import client
+
+
+def auth(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def login(client, account="student", password="123456"):
+    response = client.post("/api/auth/login", json={"account": account, "password": password})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    return body["data"]["access_token"]
+
+
+def test_health(client):
+    response = client.get("/api/health")
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["database"] == "up"
+    assert body["data"]["llm_mode"] == "mock"
+
+
+def test_course_filter_sort(client):
+    response = client.get(
+        "/api/courses",
+        params={"tech_system": "人工智能", "level": "beginner", "sort": "rating", "page_size": 10},
+    )
+    data = response.json()["data"]
+    assert data["total"] >= 1
+    assert all(item["tech_system"] == "人工智能" for item in data["items"])
+    assert all(item["level"] == "beginner" for item in data["items"])
+    ratings = [item["rating"] for item in data["items"]]
+    assert ratings == sorted(ratings, reverse=True)
+
+
+def test_course_search_by_teacher(client):
+    response = client.get("/api/courses", params={"keyword": "王老师"})
+    data = response.json()["data"]
+    assert data["total"] >= 1
+
+
+def test_course_search_by_title(client):
+    response = client.get("/api/courses", params={"keyword": "Hadoop"})
+    data = response.json()["data"]
+    assert data["total"] == 1
+    assert "Hadoop" in data["items"][0]["title"]
+
+
+def test_register_and_login(client):
+    username = f"stu_{uuid.uuid4().hex[:8]}"
+    response = client.post(
+        "/api/auth/register",
+        json={"username": username, "email": f"{username}@test.cn", "password": "abc123456"},
+    )
+    body = response.json()
+    assert body["code"] == 0
+    token = body["data"]["access_token"]
+    me = client.get("/api/users/me", headers=auth(token)).json()["data"]
+    assert me["username"] == username
+    assert me["role"] == "student"
+
+
+def test_register_duplicate(client):
+    response = client.post(
+        "/api/auth/register",
+        json={"username": "student", "email": "student@zhixueyun.cn", "password": "abc123456"},
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == 40901
+
+
+def test_login_wrong_password(client):
+    response = client.post("/api/auth/login", json={"account": "student", "password": "wrong-pass"})
+    assert response.status_code == 401
+    assert response.json()["code"] == 40101
+
+
+def test_course_detail(client):
+    response = client.get("/api/courses/1")
+    data = response.json()["data"]
+    assert data["id"] == 1
+    assert len(data["chapters"]) == 5
+    assert len(data["objectives"]) >= 3
+
+
+def test_favorite_and_progress(client):
+    token = login(client)
+    headers = auth(token)
+    first = client.post("/api/courses/3/favorite", headers=headers).json()["data"]
+    assert first["is_favorite"] is True
+    second = client.post("/api/courses/3/favorite", headers=headers).json()["data"]
+    assert second["is_favorite"] is False
+
+    detail = client.get("/api/courses/2", headers=headers).json()["data"]
+    chapter_id = detail["chapters"][0]["id"]
+    response = client.put(
+        "/api/courses/2/progress",
+        json={"chapter_id": chapter_id, "minutes": 30},
+        headers=headers,
+    )
+    data = response.json()["data"]
+    assert data["progress"] == 20
+    assert data["study_minutes"] >= 30
+
+    progress = client.get("/api/courses/2/progress", headers=headers).json()["data"]
+    assert progress["progress"] == 20
+
+
+def test_ai_chat_mock(client):
+    token = login(client)
+    headers = auth(token)
+    response = client.post(
+        "/api/ai/chat",
+        json={"message": "HDFS 的副本机制是什么？", "course_id": 2},
+        headers=headers,
+    )
+    data = response.json()["data"]
+    assert data["mode"] == "mock"
+    assert "HDFS" in data["answer"]
+    conversation_id = data["conversation_id"]
+
+    follow = client.post(
+        "/api/ai/chat",
+        json={"message": "MapReduce 的 Shuffle 做了什么？", "conversation_id": conversation_id},
+        headers=headers,
+    )
+    assert follow.json()["data"]["conversation_id"] == conversation_id
+    assert "Shuffle" in follow.json()["data"]["answer"]
+
+    conversations = client.get("/api/ai/conversations", headers=headers).json()["data"]
+    assert conversations["total"] >= 1
+
+
+def test_ai_learning_path(client):
+    token = login(client)
+    response = client.post(
+        "/api/ai/learning-path",
+        json={"goal": "三个月拿下 HCIA-AI", "weekly_hours": 8, "weak_points": "深度学习"},
+        headers=auth(token),
+    )
+    data = response.json()["data"]
+    assert data["mode"] in {"mock", "online"}
+    assert "阶段" in data["content"]
+
+
+def test_ai_grade(client):
+    token = login(client)
+    response = client.post(
+        "/api/ai/grade",
+        json={
+            "title": "两数之和",
+            "language": "python",
+            "code": "def two_sum(nums, target):\n    seen = {}\n    for i, n in enumerate(nums):\n        if target - n in seen:\n            return [seen[target - n], i]\n        seen[n] = i\n",
+        },
+        headers=auth(token),
+    )
+    result = response.json()["data"]["result"]
+    assert 0 <= result["score"] <= 100
+    assert "dimension_scores" in result
+
+
+def test_ai_study_report(client):
+    token = login(client)
+    response = client.post("/api/ai/study-report", json={"period": "week"}, headers=auth(token))
+    data = response.json()["data"]
+    assert data["stats"]["course_count"] >= 1
+    assert "本周" in data["content"]
+
+
+def test_admin_forbidden_for_student(client):
+    token = login(client)
+    response = client.get("/api/admin/users", headers=auth(token))
+    assert response.status_code == 403
+    assert response.json()["code"] == 40301
+
+
+def test_admin_manages_users(client):
+    token = login(client, "admin")
+    response = client.get("/api/admin/users", headers=auth(token))
+    data = response.json()["data"]
+    assert data["total"] >= 4
+
+
+def test_admin_course_status(client):
+    token = login(client, "admin")
+    headers = auth(token)
+    response = client.patch("/api/admin/courses/18/status", json={"status": "offline"}, headers=headers)
+    assert response.json()["data"]["status"] == "offline"
+    assert client.get("/api/courses/18").status_code == 404
+    client.patch("/api/admin/courses/18/status", json={"status": "published"}, headers=headers)
+
+
+def test_jobs(client):
+    response = client.get("/api/jobs", params={"keyword": "昂楷"})
+    data = response.json()["data"]
+    assert data["total"] >= 1
+    token = login(client)
+    job_id = data["items"][0]["id"]
+    detail = client.get(f"/api/jobs/{job_id}", headers=auth(token)).json()["data"]
+    assert detail["company"]
+    applied = client.post(f"/api/jobs/{job_id}/apply", headers=auth(token))
+    assert applied.json()["code"] == 0
+    duplicated = client.post(f"/api/jobs/{job_id}/apply", headers=auth(token))
+    assert duplicated.status_code == 409
+
+def test_course_comments(client):
+    token = login(client)
+    headers = auth(token)
+    before = client.get("/api/courses/3/comments").json()["data"]
+    created = client.post(
+        "/api/courses/3/comments",
+        json={"content": "课程节奏合适，示例很实用。", "rating": 5},
+        headers=headers,
+    )
+    assert created.json()["code"] == 0
+    after = client.get("/api/courses/3/comments").json()["data"]
+    assert after["total"] == before["total"] + 1
+    assert after["items"][0]["user_name"]
+
+
+def test_notifications_require_login(client):
+    assert client.get("/api/notifications").status_code == 401
+    assert client.get("/api/notifications/unread-count").status_code == 401
+    assert client.post("/api/notifications/read-all").status_code == 401
+
+
+def test_notification_read_flow(client):
+    headers = auth(login(client, "student"))
+
+    first = client.get("/api/notifications", headers=headers).json()["data"]
+    assert first["total"] >= 1
+    assert {"id", "type", "title", "content", "link", "is_read", "created_at"} <= set(first["items"][0])
+
+    # 幂等：重复拉取不应因为「学习提醒生成」而不断新增
+    again = client.get("/api/notifications", headers=headers).json()["data"]
+    assert again["total"] == first["total"]
+
+    unread = client.get("/api/notifications/unread-count", headers=headers).json()["data"]["unread"]
+    assert unread >= 1
+
+    only_unread = client.get(
+        "/api/notifications", params={"unread_only": "true"}, headers=headers
+    ).json()["data"]
+    assert only_unread["total"] == unread
+    assert all(item["is_read"] is False for item in only_unread["items"])
+
+    target = next(item for item in first["items"] if not item["is_read"])
+    marked = client.post(f"/api/notifications/{target['id']}/read", headers=headers).json()
+    assert marked["code"] == 0
+    assert marked["data"]["is_read"] is True
+    assert marked["data"]["unread"] == unread - 1
+
+    all_read = client.post("/api/notifications/read-all", headers=headers).json()["data"]
+    assert all_read["unread"] == 0
+    assert client.get("/api/notifications/unread-count", headers=headers).json()["data"]["unread"] == 0
+
+
+def test_notification_belongs_to_owner(client):
+    student_headers = auth(login(client, "student"))
+    admin_headers = auth(login(client, "admin"))
+
+    student_items = client.get("/api/notifications", headers=student_headers).json()["data"]["items"]
+    admin_ids = {
+        item["id"] for item in client.get("/api/notifications", headers=admin_headers).json()["data"]["items"]
+    }
+    foreign = next((item for item in student_items if item["id"] not in admin_ids), None)
+    assert foreign is not None
+    response = client.post(f"/api/notifications/{foreign['id']}/read", headers=admin_headers)
+    assert response.status_code == 404
+    assert response.json()["code"] == 40401
+
+
+def test_favorite_course_comment_notifies(client):
+    student_headers = auth(login(client, "student"))
+    admin_headers = auth(login(client, "admin"))
+
+    favorited = client.post("/api/courses/5/favorite", headers=student_headers).json()["data"]
+    assert favorited["is_favorite"] is True
+
+    created = client.post(
+        "/api/courses/5/comments",
+        json={"content": "TEST 收藏通知用例评论", "rating": 5},
+        headers=admin_headers,
+    )
+    assert created.json()["code"] == 0
+
+    items = client.get("/api/notifications", headers=student_headers).json()["data"]["items"]
+    hit = [item for item in items if item["link"] == "/courses/5" and "有新评价" in item["title"]]
+    assert hit
+    assert hit[0]["type"] == "course_update"
+    assert hit[0]["is_read"] is False
+
+    # 清理：取消收藏，避免影响后续用例
+    client.post("/api/courses/5/favorite", headers=student_headers)
+
+
+def test_comment_is_upsert_not_duplicate(client):
+    headers = auth(login(client, "student"))
+    before = client.get("/api/courses/3/comments").json()["data"]
+
+    first = client.post(
+        "/api/courses/3/comments",
+        json={"content": "同一用户的第一次提交", "rating": 4},
+        headers=headers,
+    ).json()
+    assert first["code"] == 0
+
+    second = client.post(
+        "/api/courses/3/comments",
+        json={"content": "同一用户的第二次提交", "rating": 5},
+        headers=headers,
+    ).json()
+    assert second["data"]["updated"] is True
+
+    after = client.get("/api/courses/3/comments").json()["data"]
+    assert after["total"] == before["total"]  # 同一用户同一课程不新增
+    assert any(item["content"] == "同一用户的第二次提交" for item in after["items"])
+
+
+def test_password_reset_flow(client):
+    email = "student@zhixueyun.cn"
+    sent = client.post("/api/auth/send-code", json={"email": email}).json()
+    code = sent["data"]["demo_code"]
+    assert len(code) == 6
+
+    wrong = "000001" if code != "000001" else "000002"
+    bad = client.post(
+        "/api/auth/reset-password",
+        json={"email": email, "code": wrong, "new_password": "newpass123"},
+    )
+    assert bad.status_code == 400
+
+    done = client.post(
+        "/api/auth/reset-password",
+        json={"email": email, "code": code, "new_password": "newpass123"},
+    )
+    assert done.json()["code"] == 0
+    assert client.post("/api/auth/login", json={"account": "student", "password": "newpass123"}).status_code == 200
+
+    # 验证码用过即失效
+    reused = client.post(
+        "/api/auth/reset-password",
+        json={"email": email, "code": code, "new_password": "another123"},
+    )
+    assert reused.status_code == 400
+
+    # 还原演示密码，避免影响其他用例与手工演示
+    sent_again = client.post("/api/auth/send-code", json={"email": email}).json()
+    restored = client.post(
+        "/api/auth/reset-password",
+        json={"email": email, "code": sent_again["data"]["demo_code"], "new_password": "123456"},
+    )
+    assert restored.json()["code"] == 0
+    assert client.post("/api/auth/login", json={"account": "student", "password": "123456"}).status_code == 200
+
+
+def test_protected_endpoints_require_login(client):
+    assert client.get("/api/users/me").status_code == 401
+    assert client.get("/api/notifications").status_code == 401
+    assert client.post("/api/ai/chat", json={"message": "hi"}).status_code == 401
+    assert client.get("/api/admin/stats").status_code == 401
+
+
+def test_pagination_validation(client):
+    assert client.get("/api/courses", params={"page": 0}).status_code == 422
+    assert client.get("/api/courses", params={"page_size": 51}).status_code == 422
+    headers = auth(login(client))
+    assert client.get("/api/notifications", params={"page_size": 51}, headers=headers).status_code == 422
+
+
+def test_not_found_resources(client):
+    headers = auth(login(client))
+    assert client.get("/api/courses/999999", headers=headers).status_code == 404
+    assert client.get("/api/jobs/999999", headers=headers).status_code == 404
+    assert client.post("/api/notifications/999999/read", headers=headers).status_code == 404
+
+    admin = auth(login(client, "admin"))
+    response = client.patch("/api/admin/courses/999999/status", json={"status": "offline"}, headers=admin)
+    assert response.status_code == 404
+
+
+def test_teacher_cannot_manage_others_course(client):
+    teacher = auth(login(client, "teacher_wang"))
+    response = client.patch("/api/admin/courses/2/status", json={"status": "offline"}, headers=teacher)
+    assert response.status_code == 403
+    assert response.json()["code"] == 40301
+
+    student = auth(login(client))
+    assert client.get("/api/admin/courses", headers=student).status_code == 403
+    assert client.get("/api/admin/users", headers=student).status_code == 403
+
+
+def test_invalid_enum_payloads(client):
+    admin = auth(login(client, "admin"))
+    assert client.patch("/api/admin/courses/1/status", json={"status": "archived"}, headers=admin).status_code == 422
+    assert client.patch("/api/admin/users/5/role", json={"role": "root"}, headers=admin).status_code == 422
+    assert client.post("/api/auth/register", json={"username": "ab", "email": "a@b.cn", "password": "123456"}).status_code == 422
+
+
+def test_favorite_toggle_is_idempotent(client):
+    headers = auth(login(client))
+    first = client.post("/api/courses/6/favorite", headers=headers).json()["data"]
+    assert first["is_favorite"] is True
+    try:
+        second = client.post("/api/courses/6/favorite", headers=headers).json()["data"]
+        assert second["is_favorite"] is False
+    finally:
+        detail = client.get("/api/courses/6", headers=headers).json()["data"]
+        if detail["is_favorite"]:
+            client.post("/api/courses/6/favorite", headers=headers)
+
+
+def test_ai_fallback_when_llm_unavailable(client, monkeypatch):
+    import httpx as httpx_module
+
+    from app.config import settings
+
+    class BoomClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            raise httpx_module.ConnectError("mock network down")
+
+    monkeypatch.setattr(settings, "llm_api_key", "sk-test-key", raising=False)
+    monkeypatch.setattr(httpx_module, "Client", BoomClient)
+
+    headers = auth(login(client))
+    response = client.post("/api/ai/chat", json={"message": "断网时应该降级"}, headers=headers)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["mode"] == "mock"
+    assert data["answer"]
+
+
+def test_ai_conversation_isolation(client):
+    student = auth(login(client))
+    admin = auth(login(client, "admin"))
+
+    created = client.post("/api/ai/chat", json={"message": "会话隔离用例"}, headers=student).json()["data"]
+    conversation_id = created["conversation_id"]
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"message": "越权续写", "conversation_id": conversation_id},
+        headers=admin,
+    )
+    assert response.status_code == 404
+
+
+def test_profile_and_personal_lists(client):
+    headers = auth(login(client))
+    me = client.get("/api/users/me", headers=headers).json()["data"]
+    assert me["username"] == "student"
+
+    updated = client.put(
+        "/api/users/me",
+        json={"nickname": "测试昵称", "major": "计算机科学与技术"},
+        headers=headers,
+    ).json()["data"]
+    assert updated["nickname"] == "测试昵称"
+
+    # 还原资料，避免影响演示
+    client.put("/api/users/me", json={"nickname": me["nickname"], "major": me["major"]}, headers=headers)
+
+    favorites = client.get("/api/users/me/favorites", headers=headers).json()["data"]
+    assert "items" in favorites and "total" in favorites
+    learning = client.get("/api/users/me/learning", headers=headers).json()["data"]
+    assert "items" in learning and "total_minutes" in learning
+
+
+def test_admin_lists_and_filters(client):
+    admin = auth(login(client, "admin"))
+
+    stats = client.get("/api/admin/stats", headers=admin).json()["data"]
+    assert stats["courses"] >= 18
+
+    users = client.get("/api/admin/users", params={"keyword": "teacher"}, headers=admin).json()["data"]
+    assert users["total"] >= 2
+
+    courses = client.get("/api/admin/courses", params={"keyword": "Python"}, headers=admin).json()["data"]
+    assert courses["total"] >= 1
+
+    orders = client.get("/api/admin/orders", headers=admin).json()["data"]
+    assert orders["total"] >= 1
+
+    applications = client.get("/api/admin/applications", headers=admin).json()["data"]
+    assert applications["total"] >= 1
+
+
+def test_course_offline_notifies_favorites(client):
+    admin = auth(login(client, "admin"))
+    student = auth(login(client))
+
+    client.patch("/api/admin/courses/8/status", json={"status": "offline"}, headers=admin)
+    try:
+        items = client.get(
+            "/api/notifications", params={"page_size": 50}, headers=student
+        ).json()["data"]["items"]
+        assert any(item["link"] == "/courses/8" and "下架" in item["title"] for item in items)
+    finally:
+        client.patch("/api/admin/courses/8/status", json={"status": "published"}, headers=admin)
+
+
+def test_ai_learning_path_domain_branches(client):
+    headers = auth(login(client))
+    for goal in ("鸿蒙 ArkTS 应用开发", "转岗产品经理"):
+        response = client.post(
+            "/api/ai/learning-path",
+            json={"goal": goal, "weekly_hours": 5},
+            headers=headers,
+        )
+        data = response.json()["data"]
+        assert "阶段" in data["content"]
+
+
+def test_invalid_token_and_unknown_account(client):
+    bad_headers = {"Authorization": "Bearer not-a-real-token"}
+    assert client.get("/api/users/me", headers=bad_headers).status_code == 401
+    assert client.post("/api/auth/login", json={"account": "no_such_user", "password": "123456"}).status_code == 401

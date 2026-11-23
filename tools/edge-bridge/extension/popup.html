@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div>
+        <div class="title">Browser Bridge</div>
+        <div class="sub">本机脚本 ↔ Edge 控制通道</div>
+      </div>
+      <div id="status" class="status off"><span class="dot"></span><span id="statusText">未连接</span></div>
+    </header>
+
+    <section class="block">
+      <label class="field">
+        <span>桥端口</span>
+        <input id="port" type="number" min="1" max="65535" placeholder="8765" />
+      </label>
+      <label class="field">
+        <span>Token</span>
+        <input id="token" type="text" placeholder="粘贴 bridge/.token 内容" spellcheck="false" />
+      </label>
+      <button id="save" class="primary">保存并重连</button>
+      <p id="hint" class="hint">先启动 <code>python bridge/server.py</code>，再填端口与 token。</p>
+    </section>
+
+    <section class="block">
+      <div class="block-title">当前标签页</div>
+      <div id="tabTitle" class="tab-title">—</div>
+      <div id="tabUrl" class="tab-url">—</div>
+      <div class="row">
+        <button id="probe">读取标题</button>
+        <button id="shot">截图可视区</button>
+      </div>
+      <div class="row">
+        <button id="debug">启用 JS 执行（调试器）</button>
+      </div>
+      <p class="hint">启用后可用 <code>ctl.py eval</code> 执行任意 JS；Edge 会提示「正在调试此浏览器」，属正常现象，可随时在扩展管理页撤销。</p>
+      <div id="preview" class="preview hidden"><img id="previewImg" alt="screenshot" /></div>
+      <div id="log" class="log"></div>
+    </section>
+
+    <footer class="foot">
+      仅监听 127.0.0.1；用完请关闭桥进程或移除扩展。
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
