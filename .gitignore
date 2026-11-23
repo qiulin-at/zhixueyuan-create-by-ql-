@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 
+/.env
 backend/.env
 backend/*.db
 backend/tests/*.db
