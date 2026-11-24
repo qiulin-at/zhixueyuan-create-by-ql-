@@ -2,13 +2,13 @@
 
 > 用途：把本项目交接给另一个 AI 开发 Agent（同一台机器、同一项目目录）。
 > 使用方法：复制下方「提示词正文」整段，粘贴到目标 Agent 的对话框。
-> 更新时间：2026-11-23（P0 口径校准），基线提交 `b5a8b7a`。
+> 更新时间：2026-11-24（批次 C 实测回填）。
 
 ---
 
 ## 提示词正文
 
-你接手「智学云 · 面向教育平台的智能体」项目（华为 ICT 学院《基于 Python 的 AI 项目实践》课程项目二）。项目已可运行、**46 项自动化测试通过、行覆盖 89%**，并已完成后台管理、通知、个人中心、课程/讲师/订单管理、测试补强五批工作，以及 P0 口径校准与批次 C 容器编排（运行验证受 WSL 阻塞），Git 有 5 条提交。
+你接手「智学云 · 面向教育平台的智能体」项目（华为 ICT 学院《基于 Python 的 AI 项目实践》课程项目二）。项目已可运行、**46 项自动化测试通过、行覆盖 89%**，并已完成后台管理、通知、个人中心、课程/讲师/订单管理、测试补强五批工作，以及 P0 口径校准与批次 C 容器实测，Git 有 5 条提交。
 
 你的第一原则：**先读文档与代码、后动手；不破坏现状；每批可验证**。在跑通测试并读完 `docs/06-缺口清单.md` 之前，禁止修改任何代码。
 
@@ -24,8 +24,8 @@
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
 | 测试 | **46 passed**，`pytest-cov` 行覆盖 **89%**（1254 语句 / 136 未覆盖） |
 | 仓库 | `git` 已初始化，分支 `main`，**5 条提交**，工作区干净；`origin` 为占位 URL（`https://gitee.com/你的用户名/zhixueyun.git`），**未推送** |
-| 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已交付；`docker compose config` 通过，运行验证阻塞（WSL 未安装） |
-| 缺口 | 41 项中 **32 已实现 / 6 部分 / 3 缺失**（见 `docs/06-缺口清单.md` §6） |
+| 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
+| 缺口 | 41 项中 **33 已实现 / 5 部分 / 3 缺失**（见 `docs/06-缺口清单.md` §6） |
 
 已完成的能力（不要重复开发，只需维护）：
 
@@ -37,13 +37,12 @@
 - 通知：收藏课程更新、下架、7 天停滞提醒、未读角标与已读
 - 个人中心：资料、收藏、我的课程、我的订单
 - 工程：pytest 46 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
-- 部署：`docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf`、空库自动 seed 入口（文件已交付，运行验证受 WSL 阻塞）
+- 部署：`docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf`、空库自动 seed 入口（2026-11-24 实测：三容器 healthy，8080 health 200，登录 200）
 
-尚未完成（剩余 9 项，按优先级）：
+尚未完成（剩余 8 项，按优先级）：
 
 | 编号 | 内容 | 状态 | 预估 |
 |---|---|---|---|
-| E6 | Docker Compose（mysql + backend + nginx） | 部分（文件已交付，WSL 阻塞） | 0.5–1 天 |
 | E8 | RAG 课程资料检索（带引用，离线可跑） | 缺失 | 1.5–2 天 |
 | D3 | 需求规格说明书（按真实功能重写） | 部分 | 1 天 |
 | D4 | 架构设计文档（以 openapi.json 为准） | 部分 | 1 天 |
@@ -89,7 +88,7 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 
 后续按 `docs/08` 顺序推进，一次一批：
 
-- **批次 C：Docker Compose**——`backend/Dockerfile`、`frontend/Dockerfile`（多阶段构建）、`docker-compose.yml`（mysql:8.0 + backend + nginx）、`.env.example`；nginx 托管 `dist` 并反代 `/api`。验收：`docker compose up -d --build` 后 `/api/health` 200。
+- **批次 C：Docker Compose**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 D/F/E。
 - **批次 D：RAG**——新增 `course_materials` 表、种子资料、TF-IDF/BM25 检索（**不得引入付费 embedding**）、答疑注入 Top-3 片段并在回答末尾输出「参考章节」。验收：离线可用、有引用、有新增用例。
 - **批次 F：交付物**——D3/D4 文档按真实接口重写（当前 42 路径/49 操作）、D5 15 页 PPT、D6 项目管理 4 表。**必须在 C/D 接口定稿后再写**。
 - **批次 E（可选）：B2/B4**——社区问答与 SSE，时间不足则在文档中说明取舍。

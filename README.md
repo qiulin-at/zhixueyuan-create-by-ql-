@@ -75,16 +75,18 @@ npm run dev        # http://localhost:5173
 
 Vite 已配置 `/api` 代理到 `http://127.0.0.1:8000`，并监听 `0.0.0.0`，同一局域网内可用 `http://<本机IP>:5173` 访问，方便课堂演示。
 
-### 3. Docker Compose（可选，需 WSL2）
+### 3. Docker Compose（已在本机实测，需 WSL2）
 
 ```bash
-cp .env.example .env        # 按需修改 MySQL 密码、JWT、LLM Key
+cd frontend && npm run build && cd ..   # 前端镜像使用预构建 dist
+cp .env.example .env                     # 按需修改 MySQL 密码、JWT、LLM Key
 docker compose up -d --build
 # 前端 http://localhost:8080，健康检查 http://localhost:8080/api/health
 ```
 
 - 首次启动且 `users` 表为空时自动导入演示数据；已有数据不会覆盖（设 `SEED_ON_START=false` 可关闭）。
-- 本机若未安装 WSL2，Docker Desktop 的 Linux 引擎无法启动，请改用上方双进程方式。
+- 2026-11-24 实测：三容器 healthy，health 返回 `database=up`，演示账号可登录。
+- 若 Docker Desktop 未运行，先启动并保持窗口；本机 Linux 引擎依赖 WSL2。
 
 ### 4. 演示账号（密码均为 `123456`）
 
@@ -155,7 +157,7 @@ cd backend
 1. 评论/问答社区（回复、点赞）、SSE 实时通知（当前通知为 60s 轮询）
 2. 订单支付流程（当前仅展示订单，未接支付通道）
 3. SSE 流式输出、RAG 课程资料检索与引用
-4. Docker Compose 运行验证（编排文件已交付，需 WSL2 环境）
+4. 前端容器内 npm 构建优化（当前使用宿主预构建 `dist` 规避容器内 npm 故障）
 5. 移动端响应式适配（Element Plus 栅格 + 媒体查询）
 
 ## AI 工具使用声明
