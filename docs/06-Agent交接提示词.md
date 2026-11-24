@@ -8,7 +8,7 @@
 
 ## 提示词正文
 
-你接手「智学云 · 面向教育平台的智能体」项目（华为 ICT 学院《基于 Python 的 AI 项目实践》课程项目二）。项目已可运行、**57 项自动化测试通过、行覆盖 90%**，并已完成后台管理、通知、个人中心、课程/讲师/订单管理、测试补强五批工作，以及 P0 口径校准、批次 C 容器实测、批次 D RAG 检索、D3/D4 正式文档、B4 SSE 通知、B2 学习社区、D5 答辩 PPT 与 D6 项目管理 4 表，Git 有 13 条提交。
+你接手「智学云 · 面向教育平台的智能体」项目（华为 ICT 学院《基于 Python 的 AI 项目实践》课程项目二）。项目已可运行、**57 项自动化测试通过、行覆盖 90%**，并已完成后台管理、通知、个人中心、课程/讲师/订单管理、测试补强五批工作，以及 P0 口径校准、批次 C 容器实测、批次 D RAG 检索、D3/D4 正式文档、B4 SSE 通知、B2 学习社区、D5 答辩 PPT 与 D6 项目管理 4 表，Git 有 13 条功能提交（总提交数见 `git log`）。
 
 你的第一原则：**先读文档与代码、后动手；不破坏现状；每批可验证**。在跑通测试并读完 `docs/06-缺口清单.md` 之前，禁止修改任何代码。
 
@@ -23,7 +23,7 @@
 | 接口 | **45 条路径 / 53 个操作**（`/openapi.json` 可核对；含 SSE 与社区接口） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
 | 测试 | **57 passed**，`pytest-cov` 行覆盖 **90%**（1424 语句 / 137 未覆盖） |
-| 仓库 | `git` 已初始化，分支 `main`，**13 条提交**，工作区干净（仅 `docs/09-项目会议安排.md` 未跟踪）；`origin` 为占位 URL（`https://gitee.com/你的用户名/zhixueyun.git`），**未推送** |
+| 仓库 | `git` 已初始化，分支 `main`，**13 条功能提交**（总提交数见 `git log`），工作区干净（仅 `docs/09-项目会议安排.md` 未跟踪）；`origin` 为占位 URL（`https://gitee.com/你的用户名/zhixueyun.git`），**未推送** |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
 | 学习社区 | 课程评价 + 回复/楼中楼（`parent_id`）+ 点赞（一人一次） |
