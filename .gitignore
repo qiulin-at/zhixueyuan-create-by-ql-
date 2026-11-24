@@ -23,5 +23,8 @@ backend/.coverage
 backend/coverage.xml
 backend/htmlcov/
 
+# 答辩材料（本地交付，不入公开仓库）
+output/
+
 # 本地智能体工作目录（不参与交付）
 .workbuddy/
