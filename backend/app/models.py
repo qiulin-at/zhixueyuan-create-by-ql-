@@ -178,3 +178,14 @@ class PasswordResetCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     used: Mapped[int] = mapped_column(Integer, default=0, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+class CourseMaterial(Base):
+    __tablename__ = "course_materials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(150))
+    content: Mapped[str] = mapped_column(Text, default="")
+    keywords: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

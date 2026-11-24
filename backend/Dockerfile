@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY seed.py .
+COPY seed_materials.py .
 COPY docker-entrypoint.py .
 
 EXPOSE 8000

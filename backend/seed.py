@@ -9,6 +9,7 @@ from app.models import (
     Chapter,
     Comment,
     Course,
+    CourseMaterial,
     Favorite,
     Job,
     JobApplication,
@@ -369,6 +370,151 @@ CHAPTER_TEMPLATES = {
     ],
 }
 
+
+COURSE_MATERIALS = [
+    {
+        "course": "Python 数据分析实战",
+        "items": [
+            {
+                "chapter": "课程导学与开发环境搭建",
+                "title": "数据分析环境与工具链",
+                "keywords": "Python Jupyter pandas NumPy 环境 venv",
+                "content": "建议使用 Python 3.14 + Jupyter Lab，安装 pandas、NumPy、matplotlib；用 venv 隔离依赖，数据文件放 data/ 目录，输出放 output/ 目录。",
+            },
+            {
+                "chapter": "核心概念与算法原理",
+                "title": "DataFrame 与 Series 基础",
+                "keywords": "pandas DataFrame Series 索引 缺失值 read_csv",
+                "content": "DataFrame 是二维表，Series 是一维列；用 read_csv 读入，head/info/describe 做概览，dropna 或 fillna 处理缺失值；索引对齐是 pandas 的核心机制。",
+            },
+            {
+                "chapter": "典型应用案例解析",
+                "title": "pandas 分组聚合与透视表",
+                "keywords": "pandas groupby agg 分组 聚合 透视表 pivot_table merge",
+                "content": "用 groupby('city')['sales'].sum() 按城市汇总，agg 支持多函数；pivot_table 生成透视表，merge 按 key 关联两张表，注意连接类型与重复键。",
+            },
+            {
+                "chapter": "项目实战：端到端应用开发",
+                "title": "电商销售分析项目流程",
+                "keywords": "电商 销售 分析 清洗 可视化 报告",
+                "content": "项目流程为明确问题、读取数据、清洗异常与缺失、分组聚合、可视化、输出结论；用 matplotlib 画趋势图，报告要写清指标定义与口径。",
+            },
+            {
+                "chapter": "课程总结与能力测评",
+                "title": "数据分析常见坑与检查清单",
+                "keywords": "数据类型 内存 重复值 时间序列 检查清单",
+                "content": "常见坑包括数值列被读成字符串、忽略重复订单、时区不一致、分组后忘记 reset_index；交付前检查数据类型、缺失率、重复率与指标口径。",
+            },
+        ],
+    },
+    {
+        "course": "Hadoop 大数据技术与应用",
+        "items": [
+            {
+                "chapter": "大数据技术生态概览",
+                "title": "Hadoop 生态组件全景",
+                "keywords": "Hadoop HDFS MapReduce YARN Hive Spark",
+                "content": "Hadoop 生态包含 HDFS 存储、MapReduce 计算、YARN 资源调度，以及 Hive、Spark 等上层组件；选型先看数据规模与实时性要求。",
+            },
+            {
+                "chapter": "HDFS 与 MapReduce 原理",
+                "title": "HDFS 副本与块机制",
+                "keywords": "HDFS NameNode DataNode 副本 块 128MB",
+                "content": "HDFS 默认块大小 128MB，默认 3 副本；NameNode 管理元数据，DataNode 存储数据块；适合一次写入多次读取的大文件，不适合大量小文件。",
+            },
+            {
+                "chapter": "Spark 数据处理实战",
+                "title": "MapReduce Shuffle 与 Spark 算子",
+                "keywords": "MapReduce Shuffle Spark RDD DataFrame 算子",
+                "content": "MapReduce 分为 Map、Shuffle、Reduce，Shuffle 按 key 分区排序，是性能瓶颈；Spark 用 RDD/DataFrame 算子减少磁盘读写，宽依赖会触发 Shuffle。",
+            },
+            {
+                "chapter": "数仓分层建模案例",
+                "title": "数仓分层与维度建模",
+                "keywords": "数仓 ODS DWD DWS ADS 维度建模",
+                "content": "数仓通常分 ODS、DWD、DWS、ADS 四层；维度建模围绕事实表与维度表组织，避免指标口径不一致；分层能复用中间结果、降低耦合。",
+            },
+            {
+                "chapter": "综合项目与答辩",
+                "title": "大数据项目验收清单",
+                "keywords": "项目 验收 数据质量 调度 监控",
+                "content": "验收清单包括数据链路可重跑、指标口径有文档、任务有调度与告警、异常有回滚方案；答辩时先讲业务问题，再讲技术选型与效果。",
+            },
+        ],
+    },
+    {
+        "course": "机器学习入门与实战",
+        "items": [
+            {
+                "chapter": "课程导学与开发环境搭建",
+                "title": "机器学习环境与工具",
+                "keywords": "scikit-learn Python 环境 Jupyter",
+                "content": "使用 Python 3.14 + scikit-learn + Jupyter；固定随机种子，记录数据版本与依赖版本；先跑通一个最小分类示例，再逐步扩展。",
+            },
+            {
+                "chapter": "核心概念与算法原理",
+                "title": "过拟合、正则化与模型评估",
+                "keywords": "过拟合 正则化 L1 L2 交叉验证 偏差 方差",
+                "content": "过拟合表现为训练集好、验证集差；对策包括增加数据、L1/L2 正则、Dropout、早停与交叉验证；用偏差-方差分解判断欠拟合还是过拟合。",
+            },
+            {
+                "chapter": "典型应用案例解析",
+                "title": "scikit-learn 分类与回归流程",
+                "keywords": "scikit-learn 分类 回归 Pipeline 交叉验证",
+                "content": "标准流程是划分训练/验证集、特征预处理、选择模型、交叉验证调参、在测试集评估；用 Pipeline 封装预处理与模型，避免数据泄漏。",
+            },
+            {
+                "chapter": "项目实战：端到端应用开发",
+                "title": "机器学习项目落地流程",
+                "keywords": "项目 特征工程 模型 评估 部署",
+                "content": "落地流程为定义指标、数据采集与清洗、特征工程、基线模型、迭代调优、上线监控；先建立简单基线，再逐步增加特征与模型复杂度。",
+            },
+            {
+                "chapter": "课程总结与能力测评",
+                "title": "机器学习常见误区",
+                "keywords": "数据泄漏 指标 选择 样本 不均衡",
+                "content": "常见误区包括用测试集调参、忽略样本不均衡、只看准确率、特征包含未来信息；分类任务要同时看精确率、召回率与 F1。",
+            },
+        ],
+    },
+    {
+        "course": "深度学习与图像识别",
+        "items": [
+            {
+                "chapter": "课程导学与开发环境搭建",
+                "title": "PyTorch 环境与训练流程",
+                "keywords": "PyTorch GPU 环境 训练 流程",
+                "content": "安装 PyTorch 并确认 CUDA 可用；训练循环包含前向传播、损失计算、反向传播、参数更新；先在小数据集上过拟合，验证链路正确。",
+            },
+            {
+                "chapter": "核心概念与算法原理",
+                "title": "CNN 卷积与池化原理",
+                "keywords": "CNN 卷积 池化 感受野 参数",
+                "content": "卷积层提取局部特征，池化层降低空间尺寸并增强平移不变性；堆叠卷积扩大感受野；注意通道数、步长与 padding 对输出尺寸的影响。",
+            },
+            {
+                "chapter": "典型应用案例解析",
+                "title": "图像分类与迁移学习",
+                "keywords": "图像分类 迁移学习 ResNet 数据增强",
+                "content": "小数据集优先用预训练模型做迁移学习：冻结骨干、替换分类头、再解冻微调；配合随机裁剪、翻转、归一化等数据增强。",
+            },
+            {
+                "chapter": "项目实战：端到端应用开发",
+                "title": "图像识别服务部署",
+                "keywords": "模型 部署 推理 API 服务",
+                "content": "部署流程为导出模型、封装推理接口、批处理与超时控制、监控延迟与准确率；演示时准备固定样例，避免现场依赖网络。",
+            },
+            {
+                "chapter": "课程总结与能力测评",
+                "title": "深度学习调参检查清单",
+                "keywords": "学习率 批大小 过拟合 检查清单",
+                "content": "检查清单包括学习率是否过大、批大小是否匹配显存、是否过拟合、验证集是否泄漏、数据增强是否合理；先调学习率，再调模型容量。",
+            },
+        ],
+    },
+]
+
+
 JOBS = [
     {
         "title": "Python 后端开发工程师",
@@ -561,6 +707,27 @@ def build_courses(db, users):
     return courses, chapter_map
 
 
+def build_materials(db, courses, chapter_map):
+    course_by_title = {course.title: course for course in courses}
+    for group in COURSE_MATERIALS:
+        course = course_by_title.get(group["course"])
+        if course is None:
+            continue
+        chapters = {chapter.title: chapter for chapter in chapter_map.get(course.id, [])}
+        for item in group["items"]:
+            chapter = chapters.get(item["chapter"])
+            db.add(
+                CourseMaterial(
+                    course_id=course.id,
+                    chapter_id=chapter.id if chapter is not None else None,
+                    title=item["title"],
+                    content=item["content"],
+                    keywords=item["keywords"],
+                )
+            )
+    db.flush()
+
+
 def build_jobs(db):
     db.add_all(
         [
@@ -670,6 +837,7 @@ def main():
     try:
         users = build_users(db)
         courses, chapter_map = build_courses(db, users)
+        build_materials(db, courses, chapter_map)
         build_jobs(db)
         build_demo_records(db, users, courses, chapter_map)
         db.commit()

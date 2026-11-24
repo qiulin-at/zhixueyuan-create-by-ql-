@@ -134,6 +134,63 @@ def test_ai_chat_mock(client):
     assert conversations["total"] >= 1
 
 
+def test_ai_chat_rag_citation(client):
+    token = login(client)
+    response = client.post(
+        "/api/ai/chat",
+        json={"message": "pandas 分组聚合怎么用？", "course_id": 1},
+        headers=auth(token),
+    )
+    data = response.json()["data"]
+    assert data["mode"] == "mock"
+    assert "参考：" in data["answer"]
+    assert "Python 数据分析实战" in data["answer"]
+    assert "第 3 章" in data["answer"]
+
+
+def test_ai_chat_rag_no_cross_course(client):
+    token = login(client)
+    response = client.post(
+        "/api/ai/chat",
+        json={"message": "pandas 分组聚合怎么用？", "course_id": 2},
+        headers=auth(token),
+    )
+    answer = response.json()["data"]["answer"]
+    assert "Python 数据分析实战" not in answer
+
+
+def test_ai_chat_rag_without_course(client):
+    token = login(client)
+    response = client.post(
+        "/api/ai/chat",
+        json={"message": "pandas 分组聚合怎么用？"},
+        headers=auth(token),
+    )
+    answer = response.json()["data"]["answer"]
+    assert "参考：" not in answer
+
+
+def test_rag_retrieval_scope(client):
+    from app.database import SessionLocal
+    from app.services.rag import format_materials, format_reference_line, retrieve_materials
+
+    db = SessionLocal()
+    try:
+        items = retrieve_materials(db, 1, "pandas 分组聚合", top_k=3)
+        assert items
+        assert all(item["course_id"] == 1 for item in items)
+        assert items[0]["score"] >= items[-1]["score"]
+        assert retrieve_materials(db, 9999, "pandas", top_k=3) == []
+        assert retrieve_materials(db, 1, "！！！", top_k=3) == []
+        assert retrieve_materials(db, 2, "pandas 分组聚合", top_k=3) == []
+    finally:
+        db.close()
+    assert format_materials([]) == "（无匹配资料）"
+    assert "资料《资料A》" in format_reference_line(
+        "课程A", [{"chapter_title": "", "title": "资料A", "chapter_sort": 0}]
+    )
+
+
 def test_ai_learning_path(client):
     token = login(client)
     response = client.post(

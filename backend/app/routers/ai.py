@@ -10,6 +10,7 @@ from ..schemas import ChatIn, GradeIn, LearningPathIn, ReportIn
 from ..services.llm import llm_gateway
 from ..services.mock_engine import mock_answer, mock_grade, mock_learning_path, mock_study_report
 from ..services.prompts import GRADE_SYSTEM, LEARNING_PATH_SYSTEM, REPORT_SYSTEM, TUTOR_SYSTEM
+from ..services.rag import format_materials, format_reference_line, retrieve_materials
 from ..utils import ok
 
 logger = logging.getLogger("zhixueyun.ai")
@@ -70,10 +71,12 @@ def chat(payload: ChatIn, current: User = Depends(get_current_user), db: Session
     course_title = course.title if course is not None else "通识学习"
     course_intro = course.intro if course is not None else "平台通识课程与学习方法"
     chapter_title = _chapter_context(db, current, course)
+    materials = retrieve_materials(db, course.id, payload.message, top_k=3) if course is not None else []
     system_prompt = TUTOR_SYSTEM.format(
         course_title=course_title,
         course_intro=course_intro or "暂无简介",
         chapter_title=chapter_title,
+        materials=format_materials(materials),
     )
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend({"role": item.role, "content": item.content} for item in history)
@@ -82,6 +85,10 @@ def chat(payload: ChatIn, current: User = Depends(get_current_user), db: Session
     if answer is None:
         answer = mock_answer(payload.message, course_title, chapter_title)
         mode = "mock"
+    if materials and "参考：" not in answer:
+        reference = format_reference_line(course_title, materials)
+        if reference:
+            answer = f"{answer.rstrip()}\n\n{reference}"
     db.add(AiMessage(conversation_id=conversation.id, role="assistant", content=answer))
     db.commit()
     return ok(
