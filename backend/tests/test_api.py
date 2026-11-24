@@ -452,6 +452,59 @@ def test_comment_is_upsert_not_duplicate(client):
     assert any(item["content"] == "同一用户的第二次提交" for item in after["items"])
 
 
+def test_comment_replies_and_likes(client):
+    headers = auth(login(client))
+    comments = client.get("/api/courses/3/comments").json()["data"]["items"]
+    assert comments
+    comment = comments[0]
+
+    reply = client.post(
+        f"/api/courses/3/comments/{comment['id']}/replies",
+        json={"content": "回复测试"},
+        headers=headers,
+    ).json()["data"]
+    assert reply["comment_id"] == comment["id"]
+    assert reply["parent_id"] is None
+
+    child = client.post(
+        f"/api/courses/3/comments/{comment['id']}/replies",
+        json={"content": "楼中楼回复", "parent_id": reply["id"]},
+        headers=headers,
+    ).json()["data"]
+    assert child["parent_id"] == reply["id"]
+
+    replies = client.get(f"/api/courses/3/comments/{comment['id']}/replies").json()["data"]
+    assert replies["total"] == 2
+    assert any(item["parent_id"] == reply["id"] for item in replies["items"])
+
+    bad_parent = client.post(
+        f"/api/courses/3/comments/{comment['id']}/replies",
+        json={"content": "bad", "parent_id": 99999},
+        headers=headers,
+    )
+    assert bad_parent.status_code == 404
+
+    liked = client.post(f"/api/courses/3/comments/{comment['id']}/like", headers=headers).json()["data"]
+    assert liked["liked"] is True
+    assert liked["likes_count"] == 1
+
+    unliked = client.post(f"/api/courses/3/comments/{comment['id']}/like", headers=headers).json()["data"]
+    assert unliked["liked"] is False
+    assert unliked["likes_count"] == 0
+
+    listed = client.get("/api/courses/3/comments", headers=headers).json()["data"]["items"]
+    hit = next(item for item in listed if item["id"] == comment["id"])
+    assert hit["replies_count"] >= 2
+    assert hit["likes_count"] == 0
+    assert hit["liked_by_me"] is False
+
+    unauth = client.post(
+        f"/api/courses/3/comments/{comment['id']}/replies",
+        json={"content": "未登录回复"},
+    )
+    assert unauth.status_code == 401
+
+
 def test_password_reset_flow(client):
     email = "student@zhixueyun.cn"
     sent = client.post("/api/auth/send-code", json={"email": email}).json()

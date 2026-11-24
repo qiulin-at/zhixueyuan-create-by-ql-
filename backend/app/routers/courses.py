@@ -5,8 +5,8 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_current_user_optional, get_db
-from ..models import Chapter, Comment, Course, Favorite, LearningRecord, User
-from ..schemas import CommentIn, ProgressIn
+from ..models import Chapter, Comment, CommentLike, CommentReply, Course, Favorite, LearningRecord, User
+from ..schemas import CommentIn, ProgressIn, ReplyIn
 from ..services.notifications import notify_course_comment
 from ..utils import ok, paginated
 
@@ -251,11 +251,23 @@ def update_progress(
         message="学习进度已更新",
     )
 
+def _get_comment_or_404(db: Session, course_id: int, comment_id: int) -> Comment:
+    comment = (
+        db.query(Comment)
+        .filter(Comment.id == comment_id, Comment.course_id == course_id)
+        .first()
+    )
+    if comment is None:
+        raise HTTPException(status_code=404, detail="评论不存在")
+    return comment
+
+
 @router.get("/{course_id}/comments")
 def list_comments(
     course_id: int,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=50),
+    current: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     query = (
@@ -266,6 +278,30 @@ def list_comments(
     )
     total = query.count()
     rows = query.offset((page - 1) * page_size).limit(page_size).all()
+    comment_ids = [comment.id for comment, _ in rows]
+    like_counts: dict[int, int] = {}
+    reply_counts: dict[int, int] = {}
+    liked_ids: set[int] = set()
+    if comment_ids:
+        like_counts = dict(
+            db.query(CommentLike.comment_id, func.count(CommentLike.id))
+            .filter(CommentLike.comment_id.in_(comment_ids))
+            .group_by(CommentLike.comment_id)
+            .all()
+        )
+        reply_counts = dict(
+            db.query(CommentReply.comment_id, func.count(CommentReply.id))
+            .filter(CommentReply.comment_id.in_(comment_ids))
+            .group_by(CommentReply.comment_id)
+            .all()
+        )
+        if current is not None:
+            liked_ids = {
+                row[0]
+                for row in db.query(CommentLike.comment_id)
+                .filter(CommentLike.user_id == current.id, CommentLike.comment_id.in_(comment_ids))
+                .all()
+            }
     items = [
         {
             "id": comment.id,
@@ -274,6 +310,9 @@ def list_comments(
             "user_name": user.nickname or user.username,
             "user_avatar": user.avatar,
             "created_at": comment.created_at.isoformat() if comment.created_at else None,
+            "likes_count": like_counts.get(comment.id, 0),
+            "replies_count": reply_counts.get(comment.id, 0),
+            "liked_by_me": comment.id in liked_ids,
         }
         for comment, user in rows
     ]
@@ -323,3 +362,97 @@ def create_comment(
         },
         message="评论已更新" if not is_new else "评论已发布",
     )
+
+@router.get("/{course_id}/comments/{comment_id}/replies")
+def list_replies(
+    course_id: int,
+    comment_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    _get_comment_or_404(db, course_id, comment_id)
+    query = (
+        db.query(CommentReply, User)
+        .join(User, CommentReply.user_id == User.id)
+        .filter(CommentReply.comment_id == comment_id)
+        .order_by(CommentReply.id.asc())
+    )
+    total = query.count()
+    rows = query.offset((page - 1) * page_size).limit(page_size).all()
+    items = [
+        {
+            "id": reply.id,
+            "comment_id": reply.comment_id,
+            "parent_id": reply.parent_id,
+            "content": reply.content,
+            "user_name": user.nickname or user.username,
+            "user_avatar": user.avatar,
+            "created_at": reply.created_at.isoformat() if reply.created_at else None,
+        }
+        for reply, user in rows
+    ]
+    return ok(paginated(items, total, page, page_size))
+
+
+@router.post("/{course_id}/comments/{comment_id}/replies")
+def create_reply(
+    course_id: int,
+    comment_id: int,
+    payload: ReplyIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_comment_or_404(db, course_id, comment_id)
+    if payload.parent_id is not None:
+        parent = (
+            db.query(CommentReply)
+            .filter(CommentReply.id == payload.parent_id, CommentReply.comment_id == comment_id)
+            .first()
+        )
+        if parent is None:
+            raise HTTPException(status_code=404, detail="父回复不存在")
+    reply = CommentReply(
+        comment_id=comment_id,
+        user_id=current.id,
+        parent_id=payload.parent_id,
+        content=payload.content,
+    )
+    db.add(reply)
+    db.commit()
+    db.refresh(reply)
+    return ok(
+        {
+            "id": reply.id,
+            "comment_id": reply.comment_id,
+            "parent_id": reply.parent_id,
+            "content": reply.content,
+            "user_name": current.nickname or current.username,
+            "created_at": reply.created_at.isoformat() if reply.created_at else None,
+        },
+        message="回复已发布",
+    )
+
+
+@router.post("/{course_id}/comments/{comment_id}/like")
+def toggle_comment_like(
+    course_id: int,
+    comment_id: int,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _get_comment_or_404(db, course_id, comment_id)
+    existing = (
+        db.query(CommentLike)
+        .filter(CommentLike.user_id == current.id, CommentLike.comment_id == comment_id)
+        .first()
+    )
+    if existing is None:
+        db.add(CommentLike(user_id=current.id, comment_id=comment_id))
+        liked = True
+    else:
+        db.delete(existing)
+        liked = False
+    db.commit()
+    likes_count = db.query(func.count(CommentLike.id)).filter(CommentLike.comment_id == comment_id).scalar() or 0
+    return ok({"liked": liked, "likes_count": likes_count}, message="已点赞" if liked else "已取消点赞")

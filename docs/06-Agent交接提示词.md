@@ -2,13 +2,13 @@
 
 > 用途：把本项目交接给另一个 AI 开发 Agent（同一台机器、同一项目目录）。
 > 使用方法：复制下方「提示词正文」整段，粘贴到目标 Agent 的对话框。
-> 更新时间：2026-11-24（批次 C/D 与 D3/D4 回填）。
+> 更新时间：2026-11-24（批次 C/D/E 与文档回填）。
 
 ---
 
 ## 提示词正文
 
-你接手「智学云 · 面向教育平台的智能体」项目（华为 ICT 学院《基于 Python 的 AI 项目实践》课程项目二）。项目已可运行、**56 项自动化测试通过、行覆盖 90%**，并已完成后台管理、通知、个人中心、课程/讲师/订单管理、测试补强五批工作，以及 P0 口径校准、批次 C 容器实测、批次 D RAG 检索、D3/D4 正式文档与 B4 SSE 通知，Git 有 11 条提交。
+你接手「智学云 · 面向教育平台的智能体」项目（华为 ICT 学院《基于 Python 的 AI 项目实践》课程项目二）。项目已可运行、**57 项自动化测试通过、行覆盖 90%**，并已完成后台管理、通知、个人中心、课程/讲师/订单管理、测试补强五批工作，以及 P0 口径校准、批次 C 容器实测、批次 D RAG 检索、D3/D4 正式文档、B4 SSE 通知与 B2 学习社区，Git 有 12 条提交。
 
 你的第一原则：**先读文档与代码、后动手；不破坏现状；每批可验证**。在跑通测试并读完 `docs/06-缺口清单.md` 之前，禁止修改任何代码。
 
@@ -19,43 +19,43 @@
 | 工作目录 | `C:\Users\qiulin\Desktop\项目二 面向教育平台的智能体开发`（Windows + Git Bash） |
 | 后端 | FastAPI + SQLAlchemy 2.x，Python 3.14，依赖在根目录 `.venv` |
 | 前端 | Vue 3.5 + Vite 6 + Element Plus 2.8.8 + Pinia + Router + Axios + ECharts（按需）+ marked + DOMPurify 3.2.4 |
-| 数据库 | 代码模型 **14 张表**（新增 `course_materials`）；测试库 14 张，演示库 `backend/zhixueyun.db` 仍 13 张，需跑 `seed_materials.py` 或让后端 `create_all` 建表 |
-| 接口 | **43 条路径 / 50 个操作**（`/openapi.json` 可核对；含 SSE `/api/notifications/stream`） |
+| 数据库 | 代码模型 **16 张表**（新增 `course_materials`、`comment_replies`、`comment_likes`）；测试库 16 张，演示库 `backend/zhixueyun.db` 仍 13 张，需跑 `seed_materials.py` 或让后端 `create_all` 建表 |
+| 接口 | **45 条路径 / 53 个操作**（`/openapi.json` 可核对；含 SSE 与社区接口） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
-| 测试 | **56 passed**，`pytest-cov` 行覆盖 **90%**（1360 语句 / 136 未覆盖） |
-| 仓库 | `git` 已初始化，分支 `main`，**11 条提交**，工作区干净；`origin` 为占位 URL（`https://gitee.com/你的用户名/zhixueyun.git`），**未推送** |
+| 测试 | **57 passed**，`pytest-cov` 行覆盖 **90%**（1424 语句 / 137 未覆盖） |
+| 仓库 | `git` 已初始化，分支 `main`，**12 条提交**，工作区干净；`origin` 为占位 URL（`https://gitee.com/你的用户名/zhixueyun.git`），**未推送** |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
+| 学习社区 | 课程评价 + 回复/楼中楼（`parent_id`）+ 点赞（一人一次） |
 | 课程资料 | **20 条**（4 门课各 5 段）；测试库已导入，演示库/MySQL 需跑 `seed_materials.py` 补 |
-| 缺口 | 41 项中 **37 已实现 / 2 部分 / 2 缺失**（见 `docs/06-缺口清单.md` §6） |
+| 缺口 | 41 项中 **38 已实现 / 1 部分 / 2 缺失**（见 `docs/06-缺口清单.md` §6） |
 
 已完成的能力（不要重复开发，只需维护）：
 
 - 用户：注册、登录（JWT）、重置密码（验证码落表）、资料修改、三角色
-- 课程：三维筛选、四维排序、模糊搜索、详情、收藏、章节进度、评论（一人一课一条）
+- 课程：三维筛选、四维排序、模糊搜索、详情、收藏、章节进度、评论（一人一课一条）、回复/楼中楼/点赞
 - AI：多轮答疑（含课程资料 RAG Top-3 检索与引用）、学习路径、作业批改、学习报告（Mock / 在线双模式，在线失败自动降级）
 - 就业：职位筛选、详情、申请（防重复）
 - 后台：统计、用户角色与启停、课程 CRUD 与章节维护、讲师列表与指派、订单详情与状态机、职位申请列表
 - 通知：收藏课程更新、下架、7 天停滞提醒、未读角标与已读、SSE 实时未读数（60s 轮询兜底）
 - 个人中心：资料、收藏、我的课程、我的订单
-- 工程：pytest 56 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
+- 工程：pytest 57 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
 - 文档：`docs/02-需求规格说明书.md`、`docs/03-系统架构设计.md`（2026-11-24，接口与表结构已对齐代码）
 - 部署：`docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf`、空库自动 seed 入口（2026-11-24 实测：三容器 healthy，8080 health 200，登录 200）
 
-尚未完成（剩余 4 项，按优先级）：
+尚未完成（剩余 3 项，按优先级）：
 
 | 编号 | 内容 | 状态 | 预估 |
 |---|---|---|---|
 | D5 | 答辩 PPT（15 页） | 缺失，待成员信息/截图 | 1 天 |
 | D6 | 华为项目管理 4 表（成员/任务书/进度/≥4 次纪要） | 缺失，待成员信息 | 1 天 |
-| D2 | 源码仓库远端推送 | 部分（本地 11 提交，远端占位） | 0.2 天 |
-| B2 | 学习社区（问答/回复/点赞） | 部分（现为课程评价） | 1 天，可选 |
+| D2 | 源码仓库远端推送 | 部分（本地 12 提交，远端占位） | 0.2 天 |
 
 ### 二、必读文档（按顺序，最多 20 分钟）
 
 1. `docs/06-缺口清单.md`——**唯一事实源**：41 项逐条状态、代码证据（文件:行号）、缺口与建议；§10 是各批次交付记录
 2. `docs/08-缺口补全路线图.md`——剩余工作的批次拆解、验收标准、排期
-3. `docs/07-测试与覆盖率报告.md`——56 用例、覆盖率明细、未覆盖原因
+3. `docs/07-测试与覆盖率报告.md`——57 用例、覆盖率明细、未覆盖原因
 4. `README.md`——启动方式、演示账号、接口速查
 5. `.workbuddy/memory/2026-11-23.md`——本次会话的决策与踩坑记录（若存在，建议先读）
 
@@ -72,7 +72,7 @@ cd frontend
 npm run dev                             # 默认 5173
 
 # 验证
-cd backend && ../.venv/Scripts/python.exe -m pytest tests -q        # 期望 56 passed
+cd backend && ../.venv/Scripts/python.exe -m pytest tests -q        # 期望 57 passed
 cd frontend && npm run build                                        # 期望 exit 0
 curl http://127.0.0.1:8000/api/health                               # 需先启动后端；期望 database=up, llm_mode=mock
 ```
@@ -90,13 +90,13 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 - **批次 C：Docker Compose**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 D/F/E。
 - **批次 D：RAG**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 F/E。
 - **批次 F：交付物**——✅ D3/D4 已完成（`docs/02`、`docs/03`）；剩余 D5 15 页 PPT、D6 项目管理 4 表，需成员信息。
-- **批次 E（可选）：B2/B4**——B4 SSE 已完成（2026-11-24）；B2 社区问答未做，时间不足则在文档中说明取舍。
+- **批次 E（可选）：B2/B4**——✅ B4 SSE、B2 学习社区均已完成（2026-11-24）。
 
 ### 五、硬性约束（违反即停止）
 
-1. **不得修改或删除现有 56 个测试来"让测试通过"**；测试失败必须修业务代码
+1. **不得修改或删除现有 57 个测试来"让测试通过"**；测试失败必须修业务代码
 2. 不得改动 `.venv/`、`node_modules/`、`实验指导书(1).doc`、`.workbuddy/`
-3. 不得破坏已有接口契约与页面；**56 项测试必须持续全绿**
+3. 不得破坏已有接口契约与页面；**57 项测试必须持续全绿**
 4. 新增依赖需说明理由并锁定版本（Python 3.14 / Node 18.20.1）；npm 使用 npmmirror
 5. 无 `LLM_API_KEY` 时全部 AI 功能必须 Mock 可用
 6. **不得直接改动演示库 `backend/zhixueyun.db`**：测试用 `backend/tests/test_zhixueyun.db`，UI 联调请复制副本（如 `backend/tests/ui_demo.db`）并在结束后删除；`backend/seed_materials.py` 会写库，运行前需确认
@@ -108,7 +108,7 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 ### 六、完成标准（Done when）
 
 1. `docs/06-缺口清单.md` 状态与代码一致，每条有可定位证据（`文件:行号`）
-2. `pytest -q` 退出码 0、用例数 ≥ 56、新增功能有新增用例
+2. `pytest -q` 退出码 0、用例数 ≥ 57、新增功能有新增用例
 3. `npm run build` 退出码 0
 4. 新增接口用真实请求验证（给出命令与响应摘要）
 5. `docker-compose.yml` 存在且可启动（或明确记录环境阻塞）
@@ -118,7 +118,7 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 
 ### 七、停止条件（任一出现立即停止并汇报）
 
-- 现有 56 项测试失败且无法在不改测试的前提下修复
+- 现有 57 项测试失败且无法在不改测试的前提下修复
 - 需要新增付费 API 或云服务（embedding、短信、对象存储）才能继续
 - 需要删除/重建 `backend/zhixueyun.db` 或导致演示账号失效
 - 需要降级 Python/Node 或修改已锁定依赖
@@ -141,6 +141,6 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 
 ## 使用提示
 
-- 先只发「提示词正文」+ 一句「先做只读审计，不要改代码」，确认它读到的基线（56/90%/43 路径/14 表）与你看到的一致，再放行开发。
+- 先只发「提示词正文」+ 一句「先做只读审计，不要改代码」，确认它读到的基线（57/90%/45 路径/16 表）与你看到的一致，再放行开发。
 - 若目标 Agent 不能访问本地文件，把 `README.md`、`docs/06`、`docs/07`、`docs/08`、`backend/app/`、`backend/tests/test_api.py` 一起投喂。
 - 换 Agent 前确认 `git status` 干净；新 Agent 的第一批改动应是一次独立提交，便于回滚。

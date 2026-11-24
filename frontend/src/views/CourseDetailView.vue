@@ -20,6 +20,9 @@ const commentText = ref('')
 const commentRating = ref(5)
 const submitting = ref(false)
 const marking = ref(null)
+const replyOpen = ref({})
+const replyText = ref({})
+const repliesMap = ref({})
 
 const levelLabels = {
   beginner: '初级课程',
@@ -163,6 +166,58 @@ const submitComment = async () => {
 }
 
 const formatDate = (value) => (value ? value.slice(0, 10) : '')
+
+const loadReplies = async (comment) => {
+  try {
+    const data = await courseApi.replies(course.value.id, comment.id, { page: 1, page_size: 20 })
+    repliesMap.value = { ...repliesMap.value, [comment.id]: data.items }
+    comment.replies_count = data.total
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const toggleReply = async (comment) => {
+  const next = !replyOpen.value[comment.id]
+  replyOpen.value = { ...replyOpen.value, [comment.id]: next }
+  if (next && !repliesMap.value[comment.id]) {
+    await loadReplies(comment)
+  }
+}
+
+const submitReply = async (comment) => {
+  if (!userStore.isLoggedIn) {
+    requireLogin()
+    return
+  }
+  const content = (replyText.value[comment.id] || '').trim()
+  if (!content) {
+    ElMessage.warning('请填写回复内容')
+    return
+  }
+  try {
+    await courseApi.addReply(course.value.id, comment.id, { content })
+    replyText.value = { ...replyText.value, [comment.id]: '' }
+    ElMessage.success('回复已发布')
+    await loadReplies(comment)
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const toggleCommentLike = async (comment) => {
+  if (!userStore.isLoggedIn) {
+    requireLogin()
+    return
+  }
+  try {
+    const data = await courseApi.toggleCommentLike(course.value.id, comment.id)
+    comment.liked_by_me = data.liked
+    comment.likes_count = data.likes_count
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
 
 onMounted(fetchDetail)
 </script>
@@ -342,6 +397,40 @@ onMounted(fetchDetail)
                       <span class="comment-time">{{ formatDate(item.created_at) }}</span>
                     </div>
                     <p>{{ item.content }}</p>
+                    <div class="comment-actions">
+                      <button
+                        type="button"
+                        :class="['comment-action', { active: item.liked_by_me }]"
+                        @click="toggleCommentLike(item)"
+                      >
+                        <el-icon><StarFilled /></el-icon>
+                        <span>{{ item.likes_count || 0 }}</span>
+                      </button>
+                      <button type="button" class="comment-action" @click="toggleReply(item)">
+                        <el-icon><ChatDotRound /></el-icon>
+                        <span>回复 {{ item.replies_count || 0 }}</span>
+                      </button>
+                    </div>
+                    <div v-if="replyOpen[item.id] || repliesMap[item.id]?.length" class="reply-panel">
+                      <div
+                        v-for="reply in repliesMap[item.id] || []"
+                        :key="reply.id"
+                        :class="['reply-item', { child: reply.parent_id }]"
+                      >
+                        <strong>{{ reply.user_name }}</strong>
+                        <span>{{ reply.content }}</span>
+                        <em>{{ formatDate(reply.created_at) }}</em>
+                      </div>
+                      <div class="reply-editor">
+                        <el-input
+                          v-model="replyText[item.id]"
+                          size="small"
+                          maxlength="500"
+                          placeholder="写下你的回复..."
+                        />
+                        <el-button size="small" type="primary" @click="submitReply(item)">发送</el-button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <el-empty v-if="!comments.length" description="还没有评论，来抢沙发" />
@@ -862,6 +951,69 @@ onMounted(fetchDetail)
   font-size: 13.5px;
   color: #334155;
   line-height: 1.7;
+}
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.comment-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 12.5px;
+  padding: 0;
+}
+
+.comment-action:hover,
+.comment-action.active {
+  color: #f59e0b;
+}
+
+.reply-panel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.reply-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+  padding: 4px 0;
+}
+
+.reply-item.child {
+  margin-left: 16px;
+  padding-left: 12px;
+  border-left: 2px solid #e2e8f0;
+}
+
+.reply-item strong {
+  color: #0f172a;
+  flex-shrink: 0;
+}
+
+.reply-item em {
+  margin-left: auto;
+  color: #94a3b8;
+  font-style: normal;
+  flex-shrink: 0;
+}
+
+.reply-editor {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .qa-panel {

@@ -58,6 +58,11 @@ class CommentIn(BaseModel):
     rating: int = Field(default=5, ge=1, le=5)
 
 
+class ReplyIn(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+    parent_id: int | None = None
+
+
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     conversation_id: int | None = None

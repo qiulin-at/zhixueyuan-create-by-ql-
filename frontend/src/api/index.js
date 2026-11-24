@@ -62,6 +62,12 @@ export const courseApi = {
   updateProgress: (id, payload) => api.put(`/courses/${id}/progress`, payload),
   comments: (id, params) => api.get(`/courses/${id}/comments`, { params }),
   addComment: (id, payload) => api.post(`/courses/${id}/comments`, payload),
+  replies: (courseId, commentId, params) =>
+    api.get(`/courses/${courseId}/comments/${commentId}/replies`, { params }),
+  addReply: (courseId, commentId, payload) =>
+    api.post(`/courses/${courseId}/comments/${commentId}/replies`, payload),
+  toggleCommentLike: (courseId, commentId) =>
+    api.post(`/courses/${courseId}/comments/${commentId}/like`),
 }
 
 export const aiApi = {
