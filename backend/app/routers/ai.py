@@ -1,7 +1,9 @@
 import json
 import logging
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db
@@ -9,10 +11,13 @@ from ..models import (
     AiConversation,
     AiFeedback,
     AiMessage,
+    Assignment,
     Chapter,
     Course,
+    LearningEvent,
     LearningPath,
     LearningRecord,
+    Submission,
     User,
 )
 from ..schemas import ChatIn, FeedbackIn, GradeIn, LearningPathActionIn, LearningPathIn, ReportIn
@@ -546,37 +551,184 @@ def grade(payload: GradeIn, current: User = Depends(get_current_user)):
     return ok({"result": parsed, "mode": mode})
 
 
-@router.post("/study-report")
-def study_report(payload: ReportIn, current: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    records = (
-        db.query(LearningRecord, Course)
-        .join(Course, LearningRecord.course_id == Course.id)
-        .filter(LearningRecord.user_id == current.id)
+def _report_window(period: str):
+    days = 7 if period == "week" else 30
+    end = datetime.utcnow()
+    start = end - timedelta(days=days)
+    previous_end = start
+    previous_start = previous_end - timedelta(days=days)
+    return start, end, previous_start, previous_end
+
+
+def _collect_period_stats(db: Session, user_id: int, start: datetime, end: datetime):
+    events = (
+        db.query(LearningEvent)
+        .filter(
+            LearningEvent.user_id == user_id,
+            LearningEvent.occurred_at >= start,
+            LearningEvent.occurred_at < end,
+        )
         .all()
     )
-    total_minutes = sum(record.study_minutes for record, _ in records)
-    course_count = len(records)
-    avg_progress = round(sum(record.progress for record, _ in records) / course_count) if course_count else 0
-    weakest = min(records, key=lambda item: item[0].progress) if records else None
-    weak_points = f"《{weakest[1].title}》进度仅 {weakest[0].progress}%" if weakest is not None else ""
-    stats = {
-        "total_minutes": total_minutes,
-        "course_count": course_count,
-        "avg_progress": avg_progress,
-        "weak_points": weak_points,
+    heartbeat_seconds = sum(
+        event.duration_sec for event in events if event.event_type == "heartbeat"
+    )
+    completed = {
+        event.chapter_id
+        for event in events
+        if event.event_type == "complete_chapter" and event.chapter_id is not None
     }
+    active_days = {event.occurred_at.date() for event in events if event.occurred_at}
+    event_course_ids = {event.course_id for event in events}
+
+    submissions = (
+        db.query(Submission)
+        .filter(
+            Submission.user_id == user_id,
+            Submission.submitted_at >= start,
+            Submission.submitted_at < end,
+        )
+        .all()
+    )
+    scores = []
+    dimensions: dict[str, list[float]] = {}
+    for submission in submissions:
+        score = submission.final_score if submission.final_score is not None else submission.ai_score
+        if score is not None:
+            scores.append(float(score))
+        feedback = _parse_json_payload(submission.ai_feedback_json)
+        dimension_scores = feedback.get("dimension_scores") or {}
+        if isinstance(dimension_scores, dict):
+            for name, value in dimension_scores.items():
+                try:
+                    dimensions.setdefault(str(name), []).append(float(value))
+                except (TypeError, ValueError):
+                    continue
+
+    return (
+        {
+            "effective_minutes": round(heartbeat_seconds / 60),
+            "chapters_completed": len(completed),
+            "active_days": len(active_days),
+            "course_count": len(event_course_ids),
+            "submission_count": len(submissions),
+            "avg_assignment_score": round(sum(scores) / len(scores), 1) if scores else None,
+        },
+        event_course_ids,
+        [
+            {
+                "dimension": name,
+                "name": name,
+                "score": round(sum(values) / len(values), 1),
+                "samples": len(values),
+            }
+            for name, values in dimensions.items()
+        ],
+    )
+
+
+def _merge_delta(current: dict, previous: dict) -> dict:
+    return {
+        "effective_minutes": current["effective_minutes"] - previous["effective_minutes"],
+        "chapters_completed": current["chapters_completed"] - previous["chapters_completed"],
+        "active_days": current["active_days"] - previous["active_days"],
+        "course_count": current["course_count"] - previous["course_count"],
+        "avg_assignment_score": (
+            round(current["avg_assignment_score"] - previous["avg_assignment_score"], 1)
+            if current["avg_assignment_score"] is not None
+            and previous["avg_assignment_score"] is not None
+            else None
+        ),
+    }
+
+
+@router.post("/study-report")
+def study_report(
+    payload: ReportIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    start, end, previous_start, previous_end = _report_window(payload.period)
+    current_stats, event_course_ids, knowledge = _collect_period_stats(
+        db, current.id, start, end
+    )
+    previous_stats, _, _ = _collect_period_stats(db, current.id, previous_start, previous_end)
+
+    learning_course_ids = {
+        record.course_id
+        for record in db.query(LearningRecord)
+        .filter(LearningRecord.user_id == current.id, LearningRecord.progress > 0)
+        .all()
+    }
+    scope_ids = event_course_ids | learning_course_ids
+    courses = (
+        db.query(Course).filter(Course.id.in_(scope_ids)).order_by(Course.id.asc()).all()
+        if scope_ids
+        else []
+    )
+    course_scope = [{"course_id": course.id, "title": course.title} for course in courses]
+    current_stats["course_count"] = len(course_scope) or current_stats["course_count"]
+    delta = _merge_delta(current_stats, previous_stats)
+
+    weakest = min(knowledge, key=lambda item: item["score"]) if knowledge else None
+    weak_points = (
+        f"{weakest['name']}得分 {weakest['score']}"
+        if weakest is not None
+        else ("暂无作业数据，建议先完成一次作业" if not knowledge else "")
+    )
     period_label = "本周" if payload.period == "week" else "本月"
-    prompt = REPORT_SYSTEM.format(period_label=period_label, **stats)
-    content = llm_gateway.chat(
+    prompt = REPORT_SYSTEM.format(
+        period_label=period_label,
+        total_minutes=current_stats["effective_minutes"],
+        course_count=current_stats["course_count"],
+        avg_progress=current_stats["avg_assignment_score"] or 0,
+        weak_points=weak_points,
+    )
+    prompt += (
+        "\n注意：以下统计数字由系统计算，禁止新增或修改任何数字；"
+        "建议必须指向具体课程、章节或作业。"
+    )
+    analysis = llm_gateway.chat(
         [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": "请生成学习报告"},
+            {"role": "user", "content": "请基于给定统计生成学习报告分析"},
         ],
-        temperature=0.6,
+        temperature=0.5,
         max_tokens=1000,
     )
     mode = "online"
-    if content is None:
-        content = mock_study_report(stats)
+    if analysis is None:
+        analysis = mock_study_report(
+            {
+                "total_minutes": current_stats["effective_minutes"],
+                "course_count": current_stats["course_count"],
+                "avg_progress": current_stats["avg_assignment_score"] or 0,
+                "weak_points": weak_points,
+            }
+        )
         mode = "mock"
-    return ok({"content": content, "mode": mode, "stats": stats, "period": payload.period})
+
+    content = (
+        f"## {period_label}学习报告\n\n"
+        f"- 有效学习：**{current_stats['effective_minutes']} 分钟**"
+        f"（环比 {delta['effective_minutes']:+d}）\n"
+        f"- 完成章节：**{current_stats['chapters_completed']}** 章"
+        f"（环比 {delta['chapters_completed']:+d}）\n"
+        f"- 活跃天数：**{current_stats['active_days']}** 天\n"
+        f"- 作业平均分：**{current_stats['avg_assignment_score'] if current_stats['avg_assignment_score'] is not None else '暂无'}**\n\n"
+        f"### AI 分析\n{analysis}"
+    )
+    return ok(
+        {
+            "period": payload.period,
+            "range": {"start": start.isoformat(), "end": end.isoformat()},
+            "previous_range": {"start": previous_start.isoformat(), "end": previous_end.isoformat()},
+            "updated_at": end.isoformat(),
+            "course_scope": course_scope,
+            "stats": {**current_stats, "previous": previous_stats, "delta": delta},
+            "knowledge": knowledge,
+            "analysis": analysis,
+            "content": content,
+            "mode": mode,
+        }
+    )

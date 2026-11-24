@@ -22,8 +22,7 @@ const chartRef = ref(null)
 let chartInstance = null
 
 const period = ref('week')
-const reportContent = ref('')
-const reportMode = ref('mock')
+const report = ref(null)
 const generating = ref(false)
 
 const renderMarkdown = (text) => DOMPurify.sanitize(marked.parse(text || ''))
@@ -97,13 +96,23 @@ const generateReport = async () => {
   generating.value = true
   try {
     const data = await aiApi.report({ period: period.value })
-    reportContent.value = data.content
-    reportMode.value = data.mode
+    report.value = data
   } catch (error) {
     ElMessage.error(error.message)
   } finally {
     generating.value = false
   }
+}
+
+const formatDelta = (value) => {
+  if (value === null || value === undefined) return '—'
+  const number = Number(value)
+  return number > 0 ? `+${number}` : `${number}`
+}
+
+const deltaClass = (value) => {
+  if (value === null || value === undefined || Number(value) === 0) return 'flat'
+  return Number(value) > 0 ? 'up' : 'down'
 }
 
 const continueLearning = (courseId) => {
@@ -221,12 +230,73 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <section v-if="reportContent" class="report-card zx-card">
+      <section v-if="report" class="report-card zx-card">
         <div class="panel-head">
-          <h2>AI 学习报告</h2>
-          <span class="mode-tag" :class="reportMode">{{ reportMode === 'online' ? '在线模型生成' : 'Mock 引擎生成' }}</span>
+          <h2>{{ report.period === 'week' ? '本周' : '本月' }}学习报告</h2>
+          <span class="panel-sub">
+            {{ report.range.start.slice(0, 10) }} ~ {{ report.range.end.slice(0, 10) }}
+            · 更新于 {{ report.updated_at.slice(0, 16).replace('T', ' ') }}
+          </span>
         </div>
-        <div class="markdown-body" v-html="renderMarkdown(reportContent)"></div>
+
+        <div class="report-stat-grid">
+          <div class="report-stat">
+            <span>有效学习</span>
+            <strong>{{ report.stats.effective_minutes }} <em>分钟</em></strong>
+            <small :class="deltaClass(report.stats.delta.effective_minutes)">
+              环比 {{ formatDelta(report.stats.delta.effective_minutes) }}
+            </small>
+          </div>
+          <div class="report-stat">
+            <span>完成章节</span>
+            <strong>{{ report.stats.chapters_completed }} <em>章</em></strong>
+            <small :class="deltaClass(report.stats.delta.chapters_completed)">
+              环比 {{ formatDelta(report.stats.delta.chapters_completed) }}
+            </small>
+          </div>
+          <div class="report-stat">
+            <span>活跃天数</span>
+            <strong>{{ report.stats.active_days }} <em>天</em></strong>
+            <small :class="deltaClass(report.stats.delta.active_days)">
+              环比 {{ formatDelta(report.stats.delta.active_days) }}
+            </small>
+          </div>
+          <div class="report-stat">
+            <span>作业平均分</span>
+            <strong>{{ report.stats.avg_assignment_score ?? '暂无' }}</strong>
+            <small
+              v-if="report.stats.delta.avg_assignment_score !== null"
+              :class="deltaClass(report.stats.delta.avg_assignment_score)"
+            >
+              环比 {{ formatDelta(report.stats.delta.avg_assignment_score) }}
+            </small>
+          </div>
+        </div>
+
+        <div v-if="report.course_scope.length" class="scope-line">
+          课程范围：{{ report.course_scope.map((item) => item.title).join('、') }}
+        </div>
+
+        <div v-if="report.knowledge.length" class="knowledge-box">
+          <h3>知识点掌握</h3>
+          <div v-for="item in report.knowledge" :key="item.dimension" class="knowledge-row">
+            <span>{{ item.name }}</span>
+            <el-progress :percentage="item.score" :stroke-width="8" :show-text="false" />
+            <strong>{{ item.score }}</strong>
+            <em>{{ item.samples }} 次</em>
+          </div>
+        </div>
+
+        <div class="analysis-box">
+          <div class="analysis-head">
+            <h3>AI 分析</h3>
+            <span class="mode-tag" :class="report.mode">
+              {{ report.mode === 'online' ? '在线模型生成' : 'Mock 引擎生成' }}
+            </span>
+          </div>
+          <div class="markdown-body" v-html="renderMarkdown(report.analysis)"></div>
+          <p class="analysis-note">以上数字由系统计算；AI 仅做解读，不修改数据。</p>
+        </div>
       </section>
 
       <section v-else class="report-empty zx-card">
@@ -450,6 +520,116 @@ onBeforeUnmount(() => {
 .report-card {
   margin-top: 18px;
   padding: 22px 26px 26px;
+}
+
+.report-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.report-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--zx-border);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.report-stat > span {
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.report-stat strong {
+  font-size: 22px;
+  color: var(--zx-fg);
+}
+
+.report-stat em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+  font-weight: 400;
+}
+
+.report-stat small {
+  font-size: 11.5px;
+}
+
+.report-stat small.up {
+  color: #059669;
+}
+
+.report-stat small.down {
+  color: #dc2626;
+}
+
+.report-stat small.flat {
+  color: #94a3b8;
+}
+
+.scope-line {
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  color: var(--zx-muted-fg);
+}
+
+.knowledge-box {
+  margin: 18px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--zx-border);
+}
+
+.knowledge-box h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.knowledge-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 44px 50px;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+
+.knowledge-row strong {
+  text-align: right;
+  color: var(--zx-fg);
+}
+
+.knowledge-row em {
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--zx-muted-fg);
+}
+
+.analysis-box {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--zx-border);
+}
+
+.analysis-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.analysis-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.analysis-note {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--zx-muted-fg);
 }
 
 .mode-tag {

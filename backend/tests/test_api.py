@@ -1579,3 +1579,71 @@ def test_assignment_permissions_and_deadline(client):
         )
     finally:
         client.delete(f"/api/admin/assignments/{assignment_id}", headers=teacher)
+
+def test_study_report_window_and_delta(client):
+    headers = auth(login(client))
+    client.post("/api/courses/6/enroll", headers=headers)
+    detail = client.get("/api/courses/6", headers=headers).json()["data"]
+    chapter_id = detail["chapters"][0]["id"]
+    client.post(
+        "/api/courses/6/events",
+        json={
+            "events": [
+                {"event_type": "enter_chapter", "chapter_id": chapter_id},
+                {"event_type": "heartbeat", "chapter_id": chapter_id, "duration_sec": 90},
+                {"event_type": "complete_chapter", "chapter_id": chapter_id},
+            ]
+        },
+        headers=headers,
+    )
+
+    week = client.post(
+        "/api/ai/study-report", json={"period": "week"}, headers=headers
+    ).json()["data"]
+    assert week["period"] == "week"
+    assert week["range"]["start"] and week["range"]["end"]
+    assert "delta" in week["stats"]
+    assert week["stats"]["effective_minutes"] >= 1
+    assert week["stats"]["chapters_completed"] >= 1
+    assert any(item["course_id"] == 6 for item in week["course_scope"])
+    assert week["analysis"]
+    assert "本周" in week["content"]
+
+    month = client.post(
+        "/api/ai/study-report", json={"period": "month"}, headers=headers
+    ).json()["data"]
+    assert month["stats"]["effective_minutes"] >= week["stats"]["effective_minutes"]
+
+
+def test_study_report_knowledge_from_submissions(client):
+    teacher = auth(login(client, "teacher_wang"))
+    headers = auth(login(client))
+    created = client.post(
+        "/api/admin/courses/1/assignments",
+        json={
+            "title": "H4 报告作业",
+            "description": "实现 solve(a,b)",
+            "language": "python",
+            "sample_cases": [{"args": [1, 2], "expected": 3}],
+        },
+        headers=teacher,
+    ).json()["data"]
+    assignment_id = created["id"]
+    try:
+        client.post("/api/courses/1/enroll", headers=headers)
+        submitted = client.post(
+            f"/api/assignments/{assignment_id}/submit",
+            json={"code": "def solve(a, b):\n    return a + b\n"},
+            headers=headers,
+        ).json()["data"]
+        assert submitted["ai_feedback"].get("dimension_scores")
+
+        report = client.post(
+            "/api/ai/study-report", json={"period": "week"}, headers=headers
+        ).json()["data"]
+        assert report["knowledge"]
+        assert all(item["samples"] >= 1 for item in report["knowledge"])
+        assert report["stats"]["submission_count"] >= 1
+        assert report["stats"]["avg_assignment_score"] is not None
+    finally:
+        client.delete(f"/api/admin/assignments/{assignment_id}", headers=teacher)
