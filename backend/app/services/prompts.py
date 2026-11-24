@@ -25,6 +25,21 @@ LEARNING_PATH_SYSTEM = """你是资深的学习规划师，请为学生制定个
 3. 优先推荐平台已有的 Python / AI / 大数据课程；
 4. 表格后给出 2 条执行建议。"""
 
+LEARNING_PATH_JSON_SYSTEM = """你是资深学习规划师。只使用下面给定的平台课程，生成阶段化学习路径。
+学生目标：{goal}
+每周可投入：{weekly_hours} 小时
+学习记录：{records}
+已完成课程：{completed_courses}
+可用课程：{available_courses}
+
+只输出 JSON，不要输出其他文字：
+{{"stages":[{{"stage":1,"goal":"","courses":[{{"course_id":0,"title":"","chapters":[],"hours":0}}],"checkpoint":"","reason":""}}],"resource_gap":""}}
+约束：
+1. course_id 必须来自可用课程，不得编造；
+2. 最多 4 个阶段，总时长与每周投入匹配；
+3. 无法覆盖的目标写入 resource_gap；
+4. reason 必须引用学习记录中的具体数据（进度、最近章节、已完成课程）。"""
+
 GRADE_SYSTEM = """你是严谨的编程作业批改助教。
 题目：{title}
 语言：{language}

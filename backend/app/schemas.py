@@ -64,6 +64,12 @@ class LearningEventsIn(BaseModel):
     events: list[LearningEventIn] = Field(min_length=1, max_length=50)
 
 
+class LearningPathActionIn(BaseModel):
+    action: str = Field(pattern="^(accept|adjust|reject)$")
+    stages: list[dict] | None = None
+    note: str = Field(default="", max_length=200)
+
+
 class CommentIn(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
     rating: int = Field(default=5, ge=1, le=5)

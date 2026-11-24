@@ -27,8 +27,16 @@ const pathForm = reactive({
   weekly_hours: 8,
   weak_points: '深度学习与模型调优',
 })
-const pathContent = ref('')
+const pathResult = ref(null)
+const pathList = ref([])
 const pathLoading = ref(false)
+const pathActionLoading = ref(false)
+const pathStatusLabel = {
+  draft: '草稿',
+  active: '已启用',
+  adjusted: '已调整',
+  rejected: '已放弃',
+}
 
 const gradeForm = reactive({
   title: '两数之和',
@@ -145,6 +153,19 @@ const submitFeedback = async (message, helpful) => {
   }
 }
 
+const loadPathList = async () => {
+  try {
+    const data = await aiApi.learningPaths()
+    pathList.value = data.items
+  } catch (error) {
+    pathList.value = []
+  }
+}
+
+const loadPath = (item) => {
+  pathResult.value = item
+}
+
 const generatePath = async () => {
   if (!pathForm.goal.trim()) {
     ElMessage.warning('请填写学习目标')
@@ -157,12 +178,51 @@ const generatePath = async () => {
       weekly_hours: pathForm.weekly_hours,
       weak_points: pathForm.weak_points,
     })
-    pathContent.value = data.content
+    pathResult.value = data
     mode.value = data.mode
+    await loadPathList()
   } catch (error) {
     ElMessage.error(error.message)
   } finally {
     pathLoading.value = false
+  }
+}
+
+const applyPathAction = async (action) => {
+  if (!pathResult.value) return
+  pathActionLoading.value = true
+  try {
+    const data = await aiApi.updateLearningPath(pathResult.value.id, { action })
+    pathResult.value = { ...pathResult.value, ...data }
+    ElMessage.success(action === 'accept' ? '路径已启用' : '路径已放弃')
+    await loadPathList()
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    pathActionLoading.value = false
+  }
+}
+
+const moveStage = async (index, direction) => {
+  if (!pathResult.value) return
+  const stages = [...pathResult.value.stages]
+  const target = index + direction
+  if (target < 0 || target >= stages.length) return
+  ;[stages[index], stages[target]] = [stages[target], stages[index]]
+  pathResult.value.stages = stages
+  pathActionLoading.value = true
+  try {
+    const data = await aiApi.updateLearningPath(pathResult.value.id, {
+      action: 'adjust',
+      stages,
+    })
+    pathResult.value = { ...pathResult.value, ...data }
+    ElMessage.success('路径顺序已保存')
+    await loadPathList()
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    pathActionLoading.value = false
   }
 }
 
@@ -188,6 +248,7 @@ const severityLabel = { high: '严重', medium: '中等', low: '建议' }
 onMounted(async () => {
   await loadCourses()
   await refreshConversations()
+  await loadPathList()
   if (route.query.tab === 'path') {
     tab.value = 'path'
   }
@@ -325,7 +386,7 @@ onMounted(async () => {
               <div class="tool-grid">
                 <div class="tool-form">
                   <h3>生成个性化学习路径</h3>
-                  <p class="form-desc">输入目标、每周可投入时间和薄弱点，AI 会生成分阶段学习计划。</p>
+                  <p class="form-desc">系统会读取你的学习记录、进度与已完成课程，生成只包含平台已上架课程的分阶段路径。</p>
                   <label class="field">
                     <span>学习目标</span>
                     <el-input v-model="pathForm.goal" placeholder="例如：三个月拿下 HCIA-AI 认证" />
@@ -344,10 +405,88 @@ onMounted(async () => {
                 </div>
 
                 <div class="tool-result">
-                  <div v-if="pathContent" class="markdown-body" v-html="renderMarkdown(pathContent)"></div>
+                  <div v-if="pathResult" class="path-result">
+                    <div class="path-head">
+                      <div>
+                        <h3>{{ pathResult.goal }}</h3>
+                        <p>
+                          每周 {{ pathResult.weekly_hours }} 小时 · 版本 v{{ pathResult.version }} ·
+                          {{ pathStatusLabel[pathResult.status] || pathResult.status }}
+                        </p>
+                      </div>
+                      <div class="path-actions">
+                        <el-button
+                          size="small"
+                          type="primary"
+                          plain
+                          :loading="pathActionLoading"
+                          @click="applyPathAction('accept')"
+                        >
+                          接受路径
+                        </el-button>
+                        <el-button size="small" :loading="pathActionLoading" @click="applyPathAction('reject')">
+                          放弃
+                        </el-button>
+                      </div>
+                    </div>
+
+                    <div v-if="pathResult.resource_gap" class="path-gap">
+                      资源缺口：{{ pathResult.resource_gap }}
+                    </div>
+
+                    <div v-for="(stage, index) in pathResult.stages" :key="index" class="path-stage">
+                      <div class="path-stage-head">
+                        <strong>阶段 {{ index + 1 }} · {{ stage.goal }}</strong>
+                        <div class="path-stage-tools">
+                          <el-button link size="small" :disabled="index === 0" @click="moveStage(index, -1)">
+                            上移
+                          </el-button>
+                          <el-button
+                            link
+                            size="small"
+                            :disabled="index === pathResult.stages.length - 1"
+                            @click="moveStage(index, 1)"
+                          >
+                            下移
+                          </el-button>
+                        </div>
+                      </div>
+                      <div class="path-courses">
+                        <span v-for="course in stage.courses" :key="course.course_id" class="path-course">
+                          {{ course.title }} · {{ course.hours }}h
+                        </span>
+                        <span v-if="!stage.courses.length" class="path-course muted">平台暂无匹配课程</span>
+                      </div>
+                      <p class="path-meta">检查点：{{ stage.checkpoint || '—' }}</p>
+                      <p class="path-reason">{{ stage.reason }}</p>
+                    </div>
+
+                    <div class="path-inputs">
+                      <span>依据：{{ pathResult.inputs?.records?.length || 0 }} 门在学课程</span>
+                      <span v-if="pathResult.inputs?.completed_courses?.length">
+                        已完成 {{ pathResult.inputs.completed_courses.length }} 门
+                      </span>
+                      <span v-if="pathResult.inputs?.weak_points">
+                        自述薄弱点：{{ pathResult.inputs.weak_points }}
+                      </span>
+                    </div>
+                  </div>
                   <div v-else class="result-placeholder">
                     <span class="placeholder-icon">🗺️</span>
-                    <p>填写左侧表单后，这里会展示分阶段学习路径表格与执行建议</p>
+                    <p>填写目标后，这里会展示基于真实学习记录的分阶段路径，可接受、调整顺序或放弃</p>
+                  </div>
+
+                  <div v-if="pathList.length" class="path-history">
+                    <h4>历史路径</h4>
+                    <div
+                      v-for="item in pathList"
+                      :key="item.id"
+                      class="path-history-row"
+                      @click="loadPath(item)"
+                    >
+                      <span>{{ item.goal }}</span>
+                      <em>{{ pathStatusLabel[item.status] || item.status }} · v{{ item.version }}</em>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1040,5 +1179,132 @@ onMounted(async () => {
   .message-area {
     height: 360px;
   }
+}
+
+.path-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.path-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.path-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.path-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.path-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.path-gap {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 12px;
+}
+
+.path-stage {
+  padding: 12px 14px;
+  border: 1px solid var(--zx-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.path-stage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.path-stage-head strong {
+  font-size: 13px;
+}
+
+.path-stage-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.path-courses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.path-course {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11.5px;
+}
+
+.path-course.muted {
+  background: #f1f5f9;
+  color: var(--zx-muted-fg);
+}
+
+.path-meta {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.path-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.path-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--zx-muted-fg);
+}
+
+.path-history {
+  margin-top: 16px;
+  border-top: 1px solid var(--zx-border);
+  padding-top: 10px;
+}
+
+.path-history h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.path-history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--zx-border);
+}
+
+.path-history-row em {
+  font-style: normal;
+  color: var(--zx-muted-fg);
 }
 </style>

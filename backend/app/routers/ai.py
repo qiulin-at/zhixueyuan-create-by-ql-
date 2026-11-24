@@ -5,11 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db
-from ..models import AiConversation, AiFeedback, AiMessage, Chapter, Course, LearningRecord, User
-from ..schemas import ChatIn, FeedbackIn, GradeIn, LearningPathIn, ReportIn
+from ..models import (
+    AiConversation,
+    AiFeedback,
+    AiMessage,
+    Chapter,
+    Course,
+    LearningPath,
+    LearningRecord,
+    User,
+)
+from ..schemas import ChatIn, FeedbackIn, GradeIn, LearningPathActionIn, LearningPathIn, ReportIn
 from ..services.llm import llm_gateway
-from ..services.mock_engine import mock_answer, mock_grade, mock_learning_path, mock_study_report
-from ..services.prompts import GRADE_SYSTEM, LEARNING_PATH_SYSTEM, REPORT_SYSTEM, TUTOR_SYSTEM
+from ..services.mock_engine import mock_answer, mock_grade, mock_learning_path_structured, mock_study_report
+from ..services.prompts import GRADE_SYSTEM, LEARNING_PATH_JSON_SYSTEM, REPORT_SYSTEM, TUTOR_SYSTEM
 from ..services.rag import format_materials, format_reference_line, retrieve_materials
 from ..utils import ok
 
@@ -255,26 +264,255 @@ def get_conversation(
     )
 
 
+def _published_courses(db: Session) -> list[Course]:
+    return (
+        db.query(Course)
+        .filter(Course.status == "published", Course.review_status == "published")
+        .order_by(Course.study_count.desc(), Course.id.asc())
+        .all()
+    )
+
+
+def _learning_snapshot(db: Session, user: User, weak_points: str = "") -> dict:
+    records = db.query(LearningRecord).filter(LearningRecord.user_id == user.id).all()
+    items = []
+    for record in records:
+        course = db.get(Course, record.course_id)
+        if course is None:
+            continue
+        items.append(
+            {
+                "course_id": course.id,
+                "title": course.title,
+                "progress": record.progress,
+                "last_chapter_id": record.last_chapter_id,
+                "effective_minutes": record.effective_minutes,
+            }
+        )
+    return {
+        "records": items,
+        "completed_courses": [item for item in items if item["progress"] >= 100],
+        "weak_points": weak_points.strip(),
+    }
+
+
+def _parse_json_payload(content: str | None) -> dict | None:
+    if not content:
+        return None
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        value = json.loads(text[start : end + 1])
+        return value if isinstance(value, dict) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_stages(raw_stages, course_map: dict[int, Course], strict: bool = False):
+    stages = []
+    gaps = []
+    for index, stage in enumerate((raw_stages or [])[:4], start=1):
+        if not isinstance(stage, dict):
+            continue
+        courses = []
+        for item in (stage.get("courses") or [])[:4]:
+            if not isinstance(item, dict):
+                continue
+            try:
+                course_id = int(item.get("course_id", 0))
+            except (TypeError, ValueError):
+                course_id = 0
+            if course_id in course_map:
+                course = course_map[course_id]
+                try:
+                    hours = int(item.get("hours") or 4)
+                except (TypeError, ValueError):
+                    hours = 4
+                courses.append(
+                    {
+                        "course_id": course.id,
+                        "title": course.title,
+                        "chapters": [str(chapter)[:20] for chapter in (item.get("chapters") or [])[:8]],
+                        "hours": max(1, min(hours, 40)),
+                    }
+                )
+            else:
+                gaps.append(f"平台无课程：{item.get('title') or course_id}")
+        if strict and not courses and stage.get("courses"):
+            raise HTTPException(status_code=400, detail="调整后的路径包含平台不存在的课程")
+        stages.append(
+            {
+                "stage": index,
+                "goal": str(stage.get("goal") or f"阶段 {index}")[:120],
+                "courses": courses,
+                "checkpoint": str(stage.get("checkpoint") or "")[:200],
+                "reason": str(stage.get("reason") or "")[:300],
+            }
+        )
+    return stages, "；".join(gaps)
+
+
+def _render_path_markdown(path: dict) -> str:
+    lines = [
+        f"## 学习路径：{path['goal']}",
+        "",
+        f"每周投入：**{path['weekly_hours']} 小时**",
+        "",
+        "| 阶段 | 目标 | 课程 | 检查点 |",
+        "|---|---|---|---|",
+    ]
+    for stage in path.get("stages", []):
+        courses = "、".join(item["title"] for item in stage["courses"]) or "—"
+        lines.append(
+            f"| 阶段 {stage['stage']} | {stage['goal']} | {courses} | {stage['checkpoint']} |"
+        )
+    if path.get("resource_gap"):
+        lines.extend(["", f"**资源缺口：** {path['resource_gap']}"])
+    return "\n".join(lines)
+
+
+def _path_dict(path: LearningPath) -> dict:
+    try:
+        stages = json.loads(path.stages_json or "[]")
+    except (TypeError, ValueError):
+        stages = []
+    try:
+        inputs = json.loads(path.inputs_json or "{}")
+    except (TypeError, ValueError):
+        inputs = {}
+    return {
+        "id": path.id,
+        "goal": path.goal,
+        "weekly_hours": path.weekly_hours,
+        "stages": stages,
+        "resource_gap": path.resource_gap,
+        "inputs": inputs,
+        "status": path.status,
+        "version": path.version,
+        "source": path.source,
+        "created_at": path.created_at.isoformat() if path.created_at else None,
+        "updated_at": path.updated_at.isoformat() if path.updated_at else None,
+    }
+
+
 @router.post("/learning-path")
-def learning_path(payload: LearningPathIn, current: User = Depends(get_current_user)):
-    prompt = LEARNING_PATH_SYSTEM.format(
+def learning_path(
+    payload: LearningPathIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    courses = _published_courses(db)
+    course_map = {course.id: course for course in courses}
+    snapshot = _learning_snapshot(db, current, payload.weak_points)
+    available = [
+        {
+            "course_id": course.id,
+            "title": course.title,
+            "tech_system": course.tech_system,
+            "tech_direction": course.tech_direction,
+            "level": course.level,
+        }
+        for course in courses
+    ]
+    prompt = LEARNING_PATH_JSON_SYSTEM.format(
         goal=payload.goal,
         weekly_hours=payload.weekly_hours,
-        weak_points=payload.weak_points.strip() or "未填写",
+        records=json.dumps(snapshot["records"], ensure_ascii=False),
+        completed_courses=json.dumps(snapshot["completed_courses"], ensure_ascii=False),
+        available_courses=json.dumps(available, ensure_ascii=False),
     )
     content = llm_gateway.chat(
         [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": f"请为「{payload.goal}」制定学习路径"},
+            {"role": "user", "content": f"请为「{payload.goal}」生成路径 JSON"},
         ],
-        temperature=0.5,
-        max_tokens=1200,
+        temperature=0.4,
+        max_tokens=1600,
     )
     mode = "online"
-    if content is None:
-        content = mock_learning_path(payload.goal, payload.weekly_hours, payload.weak_points)
+    raw = _parse_json_payload(content)
+    if raw is None:
+        raw = mock_learning_path_structured(payload.goal, payload.weekly_hours, available, snapshot)
         mode = "mock"
-    return ok({"content": content, "mode": mode})
+    stages, gaps = _normalize_stages(raw.get("stages") or [], course_map)
+    resource_gap = "；".join(
+        part for part in [(raw.get("resource_gap") or "").strip(), gaps] if part
+    )
+    path = LearningPath(
+        user_id=current.id,
+        goal=payload.goal.strip(),
+        weekly_hours=payload.weekly_hours,
+        stages_json=json.dumps(stages, ensure_ascii=False),
+        resource_gap=resource_gap,
+        inputs_json=json.dumps(snapshot, ensure_ascii=False),
+        status="draft",
+        version=1,
+        source=mode,
+    )
+    db.add(path)
+    db.commit()
+    db.refresh(path)
+    data = _path_dict(path)
+    data["content"] = _render_path_markdown(data)
+    data["mode"] = mode
+    return ok(data, message="学习路径已生成")
+
+
+@router.get("/learning-paths")
+def list_learning_paths(
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(LearningPath)
+        .filter(LearningPath.user_id == current.id)
+        .order_by(LearningPath.id.desc())
+        .limit(20)
+        .all()
+    )
+    items = [_path_dict(row) for row in rows]
+    return ok({"items": items, "total": len(items)})
+
+
+@router.patch("/learning-paths/{path_id}")
+def update_learning_path(
+    path_id: int,
+    payload: LearningPathActionIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    path = db.get(LearningPath, path_id)
+    if path is None or path.user_id != current.id:
+        raise HTTPException(status_code=404, detail="学习路径不存在")
+    if payload.action == "accept":
+        path.status = "active"
+    elif payload.action == "reject":
+        path.status = "rejected"
+    else:
+        course_map = {course.id: course for course in _published_courses(db)}
+        try:
+            existing = json.loads(path.stages_json or "[]")
+        except (TypeError, ValueError):
+            existing = []
+        normalized, _ = _normalize_stages(
+            payload.stages if payload.stages is not None else existing,
+            course_map,
+            strict=True,
+        )
+        path.stages_json = json.dumps(normalized, ensure_ascii=False)
+        path.status = "adjusted"
+        path.version = (path.version or 1) + 1
+    db.add(path)
+    db.commit()
+    db.refresh(path)
+    return ok(_path_dict(path), message="学习路径已更新")
 
 
 @router.post("/grade")

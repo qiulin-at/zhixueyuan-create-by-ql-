@@ -79,6 +79,8 @@ export const aiApi = {
   conversation: (id) => api.get(`/ai/conversations/${id}`),
   feedback: (id, payload) => api.post(`/ai/messages/${id}/feedback`, payload),
   learningPath: (payload) => api.post('/ai/learning-path', payload),
+  learningPaths: () => api.get('/ai/learning-paths'),
+  updateLearningPath: (id, payload) => api.patch(`/ai/learning-paths/${id}`, payload),
   grade: (payload) => api.post('/ai/grade', payload),
   report: (payload) => api.post('/ai/study-report', payload),
 }

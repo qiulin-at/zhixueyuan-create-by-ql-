@@ -19,10 +19,10 @@
 | 工作目录 | `C:\Users\qiulin\Desktop\项目二 面向教育平台的智能体开发`（Windows + Git Bash） |
 | 后端 | FastAPI + SQLAlchemy 2.x，Python 3.14，依赖在根目录 `.venv` |
 | 前端 | Vue 3.5 + Vite 6 + Element Plus 2.8.8 + Pinia + Router + Axios + ECharts（按需）+ marked + DOMPurify 3.2.4 |
-| 数据库 | 代码模型 **21 张表**（G1 `operation_logs`；G2 `enrollments`、`taxonomy_terms`；G3 `learning_events`；H1 `ai_feedbacks`）；测试库与演示库均 21 张；`backend/migrate_v2.py` 可幂等建表 + 补列 |
-| 接口 | **60 条路径 / 73 个操作**（`/openapi.json` 可核对；H1 新增反馈与知识库维护） |
+| 数据库 | 代码模型 **22 张表**（G1 `operation_logs`；G2 `enrollments`、`taxonomy_terms`；G3 `learning_events`；H1 `ai_feedbacks`；H2 `learning_paths`）；测试库与演示库均 22 张；`backend/migrate_v2.py` 可幂等建表 + 补列 |
+| 接口 | **62 条路径 / 75 个操作**（`/openapi.json` 可核对；H2 新增路径列表与状态流转） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
-| 测试 | **77 passed**，`pytest-cov` 行覆盖 **89%**（1996 语句 / 228 未覆盖） |
+| 测试 | **79 passed**，`pytest-cov` 行覆盖 **87%**（2163 语句 / 278 未覆盖） |
 | 仓库 | `git` 已初始化并推送 GitHub：`https://github.com/qiulin-at/zhixueyuan-create-by-ql-.git`（public，`main`；当前与 `origin/main` 同步，D2 推送提交 `a0be17b`，**17 条功能提交**，另有文档/口径回填提交见 `git log`）；`output/` 不入公开仓库（本地交付）；历史已重写移除 `output/`，旧历史备份 `.codeartsdoer/git-backup/zhixueyun-before-rewrite.bundle` |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
@@ -34,12 +34,12 @@
 
 - 用户：注册、登录（JWT）、重置密码（验证码落表）、资料修改、三角色
 - 课程：三维筛选、四维排序、模糊搜索、详情、收藏、章节进度、报名（免费直报/付费校验订单）、章节资源、课程审核态、适用对象/先修要求、学习事件（心跳有效时长）、断点续学、评论（一人一课一条）、回复/楼中楼/点赞
-- AI：多轮答疑（RAG Top-3 引用、资料不足显式提示、有帮助/无帮助反馈）、学习路径、作业批改、学习报告（Mock / 在线双模式，在线失败自动降级）
+- AI：多轮答疑（RAG Top-3 引用、资料不足显式提示、有帮助/无帮助反馈）、基于真实记录的结构化学习路径（落库、可调整）、作业批改、学习报告（Mock / 在线双模式，在线失败自动降级）
 - 就业：职位筛选、详情、申请（防重复）
 - 后台：统计、用户角色与启停、课程 CRUD 与章节维护、课程审核、章节资源、课程知识库、分类字典、讲师列表与指派、订单详情与状态机、职位申请列表、操作日志（G1）、教师课程学情（G1）
 - 通知：收藏课程更新、下架、7 天停滞提醒、未读角标与已读、SSE 实时未读数（60s 轮询兜底）
 - 个人中心：资料、收藏、我的课程、我的订单
-- 工程：pytest 77 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
+- 工程：pytest 79 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
 - 文档：`docs/02-需求规格说明书.md`、`docs/03-系统架构设计.md`（2026-11-24，接口与表结构已对齐代码）
 - 部署：`docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf`、空库自动 seed 入口（2026-11-24 实测：三容器 healthy，8080 health 200，登录 200）
 - 交付物：`output/邱麟_答辩PPT_v2.pptx`（18 页）、`output/邱麟_项目管理4表_v2.docx`（28 表 / 8 次纪要）；一期 15 页 PPT / 19 表 Word 保留
@@ -89,7 +89,8 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 - **二期 G1：权限矩阵与操作审计**——✅ 已完成（2026-11-24）：`operation_logs` + 教师学情 + 前端双 Tab；62 passed / 91%。
 - **二期 G2：课程资源与报名**——✅ 已完成（2026-11-24）：`enrollments` + 资源 + 分类字典 + 审核态；67 passed / 90%。
 - **二期 G3：学习事件与继续学习**——✅ 已完成（2026-11-24）：`learning_events` + 有效时长 + 断点续学；72 passed / 90%。
-- **二期 H1：RAG 可信闭环**——✅ 已完成（2026-11-24）：切分 + 资料不足 + 反馈 + 知识库；77 passed / 89%；下一步 H2。
+- **二期 H1：RAG 可信闭环**——✅ 已完成（2026-11-24）：切分 + 资料不足 + 反馈 + 知识库；77 passed / 89%。
+- **二期 H2：学习路径 2.0**——✅ 已完成（2026-11-24）：真实记录 + 结构化 + 落库 + 可调整；79 passed / 87%；下一步 H3。
 
 - **批次 C：Docker Compose**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 D/F/E。
 - **批次 D：RAG**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 F/E。

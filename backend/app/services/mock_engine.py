@@ -113,6 +113,75 @@ def mock_learning_path(goal: str, weekly_hours: int, weak_points: str) -> str:
     )
 
 
+def mock_learning_path_structured(goal: str, weekly_hours: int, courses: list[dict], inputs: dict) -> dict:
+    hours = max(int(weekly_hours), 1)
+    goal_lower = goal.lower()
+    if not courses:
+        return {
+            "stages": [],
+            "resource_gap": "平台暂无已上架课程，无法生成路径；请先在后台发布课程。",
+        }
+
+    def pick(keywords: list[str], start: int) -> list[dict]:
+        matched = [
+            course
+            for course in courses
+            if any(keyword in f"{course['title']}{course.get('tech_system', '')}{course.get('tech_direction', '')}" for keyword in keywords)
+        ]
+        selected = matched[:2]
+        if len(selected) < 2:
+            selected = courses[start : start + 2]
+        return selected
+
+    if "鸿蒙" in goal or "harmony" in goal_lower or "arkts" in goal_lower:
+        groups = [pick(["鸿蒙", "ArkTS", "HarmonyOS"], 0), pick(["应用", "开发", "鸿蒙"], 2)]
+        checkpoint = ["完成 ArkTS 语法与静态页面", "完成多页面应用与端云联调"]
+    elif "大数据" in goal or "hadoop" in goal_lower or "spark" in goal_lower:
+        groups = [pick(["Python", "SQL", "Linux"], 0), pick(["Hadoop", "Spark", "数据"], 2)]
+        checkpoint = ["完成数据清洗脚本", "完成离线统计项目"]
+    elif "ai" in goal_lower or "人工智能" in goal or "大模型" in goal:
+        groups = [pick(["Python", "pandas", "数据分析"], 0), pick(["机器学习", "深度学习", "AI"], 2)]
+        checkpoint = ["完成数据分析小作业", "完成一次模型训练与评估"]
+    else:
+        groups = [courses[0:2], courses[2:4]]
+        checkpoint = ["完成基础能力自测", "完成一个可演示的小项目"]
+
+    records = inputs.get("records", [])
+    completed = inputs.get("completed_courses", [])
+    if completed:
+        reason_prefix = f"你已完成 {len(completed)} 门课程，按剩余目标继续推进"
+    elif records:
+        reason_prefix = f"你在学 {len(records)} 门课程，先补齐基础再进入核心课"
+    else:
+        reason_prefix = "暂无学习记录，从基础课开始建立学习节奏"
+
+    stages = []
+    for index, group in enumerate(groups, start=1):
+        if not group:
+            continue
+        stages.append(
+            {
+                "stage": index,
+                "goal": f"阶段 {index}：{'基础补齐' if index == 1 else '核心提升'}",
+                "courses": [
+                    {
+                        "course_id": course.get("id") or course.get("course_id"),
+                        "title": course["title"],
+                        "chapters": [],
+                        "hours": max(2, hours * 2),
+                    }
+                    for course in group
+                ],
+                "checkpoint": checkpoint[min(index - 1, len(checkpoint) - 1)],
+                "reason": f"{reason_prefix}；每周投入 {hours} 小时，预计本阶段 2 周完成",
+            }
+        )
+    return {
+        "stages": stages,
+        "resource_gap": "" if len(stages) >= 2 else "平台课程覆盖不足，建议先补齐基础课程。",
+    }
+
+
 def mock_grade(title: str, language: str, code: str) -> str:
     lines = [line for line in code.splitlines() if line.strip()]
     issues = []

@@ -1339,3 +1339,102 @@ def test_delete_course_removes_materials(client):
         assert db.get(CourseMaterial, knowledge["id"]) is None
     finally:
         db.close()
+
+def test_learning_path_structured_and_persisted(client):
+    headers = auth(login(client))
+    client.post("/api/courses/6/enroll", headers=headers)
+    detail = client.get("/api/courses/6", headers=headers).json()["data"]
+    chapter_id = detail["chapters"][0]["id"]
+    client.post(
+        "/api/courses/6/events",
+        json={"events": [{"event_type": "complete_chapter", "chapter_id": chapter_id}]},
+        headers=headers,
+    )
+
+    data = client.post(
+        "/api/ai/learning-path",
+        json={"goal": "三个月拿下 HCIA-AI", "weekly_hours": 8},
+        headers=headers,
+    ).json()["data"]
+    assert data["stages"]
+    assert data["status"] == "draft"
+    assert data["version"] == 1
+    assert data["source"] in {"mock", "online"}
+    assert data["content"]
+    assert any(item["course_id"] == 6 for item in data["inputs"]["records"])
+
+    catalog = client.get("/api/courses", params={"page_size": 50}).json()["data"]["items"]
+    valid_ids = {course["id"] for course in catalog}
+    for stage in data["stages"]:
+        for course in stage["courses"]:
+            assert course["course_id"] in valid_ids
+
+    paths = client.get("/api/ai/learning-paths", headers=headers).json()["data"]
+    assert any(item["id"] == data["id"] for item in paths["items"])
+
+
+def test_learning_path_actions_and_validation(client):
+    headers = auth(login(client))
+    data = client.post(
+        "/api/ai/learning-path",
+        json={"goal": "鸿蒙 ArkTS 应用开发", "weekly_hours": 5},
+        headers=headers,
+    ).json()["data"]
+    path_id = data["id"]
+
+    accepted = client.patch(
+        f"/api/ai/learning-paths/{path_id}",
+        json={"action": "accept"},
+        headers=headers,
+    ).json()["data"]
+    assert accepted["status"] == "active"
+
+    adjusted = client.patch(
+        f"/api/ai/learning-paths/{path_id}",
+        json={"action": "adjust", "stages": list(reversed(data["stages"]))},
+        headers=headers,
+    ).json()["data"]
+    assert adjusted["status"] == "adjusted"
+    assert adjusted["version"] == 2
+
+    invalid = client.patch(
+        f"/api/ai/learning-paths/{path_id}",
+        json={
+            "action": "adjust",
+            "stages": [
+                {
+                    "stage": 1,
+                    "goal": "非法课程",
+                    "courses": [{"course_id": 999999, "title": "不存在", "hours": 4}],
+                }
+            ],
+        },
+        headers=headers,
+    )
+    assert invalid.status_code == 400
+
+    rejected = client.patch(
+        f"/api/ai/learning-paths/{path_id}",
+        json={"action": "reject"},
+        headers=headers,
+    ).json()["data"]
+    assert rejected["status"] == "rejected"
+
+    admin = auth(login(client, "admin"))
+    assert (
+        client.patch(
+            f"/api/ai/learning-paths/{path_id}",
+            json={"action": "accept"},
+            headers=admin,
+        ).status_code
+        == 404
+    )
+
+    assert (
+        client.patch(
+            f"/api/ai/learning-paths/{path_id}",
+            json={"action": "archive"},
+            headers=headers,
+        ).status_code
+        == 422
+    )

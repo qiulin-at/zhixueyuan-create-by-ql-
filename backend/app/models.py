@@ -181,6 +181,23 @@ class AiFeedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class LearningPath(Base):
+    __tablename__ = "learning_paths"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    goal: Mapped[str] = mapped_column(String(200))
+    weekly_hours: Mapped[int] = mapped_column(Integer, default=6)
+    stages_json: Mapped[str] = mapped_column(Text, default="[]")
+    resource_gap: Mapped[str] = mapped_column(Text, default="")
+    inputs_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(8), default="ai")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
