@@ -825,13 +825,14 @@ def course_students(
             "major": user.major,
             "progress": record.progress,
             "study_minutes": record.study_minutes,
+            "effective_minutes": record.effective_minutes,
             "last_chapter_id": record.last_chapter_id,
             "last_chapter_title": chapters.get(record.last_chapter_id, ""),
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         }
         for record, user in rows
     ]
-    total_minutes = sum(item["study_minutes"] for item in items)
+    total_minutes = sum(item["effective_minutes"] or item["study_minutes"] for item in items)
     avg_progress = round(sum(item["progress"] for item in items) / len(items)) if items else 0
     return ok(
         {

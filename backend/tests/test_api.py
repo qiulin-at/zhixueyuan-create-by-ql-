@@ -1114,3 +1114,83 @@ def test_course_review_flow(client):
         assert resubmitted["review_status"] == "pending"
     finally:
         client.delete(f"/api/admin/courses/{course_id}", headers=admin)
+
+def test_learning_events_progress_and_resume(client):
+    headers = auth(login(client))
+    client.post("/api/courses/6/enroll", headers=headers)
+    detail = client.get("/api/courses/6", headers=headers).json()["data"]
+    chapter = detail["chapters"][0]
+
+    result = client.post(
+        "/api/courses/6/events",
+        json={
+            "events": [
+                {"event_type": "enter_chapter", "chapter_id": chapter["id"], "position_sec": 120},
+                {"event_type": "heartbeat", "chapter_id": chapter["id"], "duration_sec": 90, "position_sec": 120},
+                {"event_type": "complete_chapter", "chapter_id": chapter["id"], "position_sec": 120},
+            ]
+        },
+        headers=headers,
+    ).json()["data"]
+    assert result["progress"] >= 20
+    assert result["effective_minutes"] == 2
+    assert result["last_chapter_id"] == chapter["id"]
+    assert result["last_position_sec"] == 120
+
+    refreshed = client.get("/api/courses/6", headers=headers).json()["data"]
+    assert refreshed["last_chapter_id"] == chapter["id"]
+    assert refreshed["last_chapter_title"] == chapter["title"]
+    assert refreshed["effective_minutes"] == 2
+    assert refreshed["last_position_sec"] == 120
+
+    progress = client.get("/api/courses/6/progress", headers=headers).json()["data"]
+    assert progress["effective_minutes"] == 2
+    assert progress["last_chapter_title"] == chapter["title"]
+
+
+def test_learning_heartbeat_is_capped(client):
+    headers = auth(login(client))
+    client.post("/api/courses/3/enroll", headers=headers)
+    detail = client.get("/api/courses/3", headers=headers).json()["data"]
+    chapter_id = detail["chapters"][0]["id"]
+    result = client.post(
+        "/api/courses/3/events",
+        json={
+            "events": [
+                {"event_type": "heartbeat", "chapter_id": chapter_id, "duration_sec": 600},
+                {"event_type": "heartbeat", "chapter_id": chapter_id, "duration_sec": 600},
+            ]
+        },
+        headers=headers,
+    ).json()["data"]
+    assert result["effective_minutes"] == 4
+
+
+def test_learning_event_chapter_must_belong_to_course(client):
+    headers = auth(login(client))
+    response = client.post(
+        "/api/courses/6/events",
+        json={"events": [{"event_type": "enter_chapter", "chapter_id": 999999}]},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_learning_events_require_enrollment(client):
+    headers = auth(login(client))
+    response = client.post(
+        "/api/courses/5/events",
+        json={"events": [{"event_type": "enter_chapter", "chapter_id": None}]},
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
+def test_learning_events_reject_teacher(client):
+    teacher = auth(login(client, "teacher_wang"))
+    response = client.post(
+        "/api/courses/1/events",
+        json={"events": [{"event_type": "enter_chapter", "chapter_id": None}]},
+        headers=teacher,
+    )
+    assert response.status_code == 403

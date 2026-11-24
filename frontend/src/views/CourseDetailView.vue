@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, CircleCheck, Clock, StarFilled, User } from '@element-plus/icons-vue'
@@ -21,6 +21,8 @@ const commentRating = ref(5)
 const submitting = ref(false)
 const marking = ref(null)
 const enrolling = ref(false)
+const activeChapterId = ref(null)
+let heartbeatTimer = null
 const replyOpen = ref({})
 const replyText = ref({})
 const repliesMap = ref({})
@@ -123,13 +125,60 @@ const enroll = async () => {
   }
 }
 
+const reportEvent = async (event) => {
+  try {
+    const data = await courseApi.reportEvents(course.value.id, { events: [event] })
+    completed.value = data.completed_chapters || completed.value
+    course.value.progress = data.progress
+    course.value.study_minutes = data.study_minutes
+    course.value.effective_minutes = data.effective_minutes
+    course.value.last_chapter_id = data.last_chapter_id
+    course.value.last_position_sec = data.last_position_sec
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const startChapter = (chapter) => {
+  if (!userStore.isLoggedIn) {
+    requireLogin()
+    return
+  }
+  if (!course.value.can_learn) {
+    ElMessage.warning('请先报名课程后再开始学习')
+    return
+  }
+  activeChapterId.value = chapter.id
+  reportEvent({ event_type: 'enter_chapter', chapter_id: chapter.id, position_sec: 0 })
+  ElMessage.success(`开始学习：${chapter.title}`)
+}
+
+const resumeLearning = () => {
+  if (!course.value.can_learn || !course.value.last_chapter_id) return
+  activeTab.value = 'catalog'
+  activeChapterId.value = course.value.last_chapter_id
+  reportEvent({
+    event_type: 'enter_chapter',
+    chapter_id: course.value.last_chapter_id,
+    position_sec: course.value.last_position_sec || 0,
+  })
+}
+
 const startLearning = () => {
   if (!userStore.isLoggedIn) {
     requireLogin()
     return
   }
+  if (!course.value.can_learn) {
+    ElMessage.warning('请先报名课程后再开始学习')
+    return
+  }
   activeTab.value = 'catalog'
-  ElMessage.info('请选择章节开始学习，学完后点击「标记完成」')
+  if (course.value.last_chapter_id) {
+    resumeLearning()
+  } else {
+    ElMessage.info('请选择章节开始学习，学完后点击「标记完成」')
+  }
 }
 
 const markCompleted = async (chapter) => {
@@ -143,13 +192,13 @@ const markCompleted = async (chapter) => {
   }
   marking.value = chapter.id
   try {
-    const data = await courseApi.updateProgress(course.value.id, {
-      chapter_id: chapter.id,
-      minutes: chapter.duration_min,
+    const data = await courseApi.reportEvents(course.value.id, {
+      events: [{ event_type: 'complete_chapter', chapter_id: chapter.id, duration_sec: 0, position_sec: 0 }],
     })
     completed.value = data.completed_chapters
     course.value.progress = data.progress
     course.value.study_minutes = data.study_minutes
+    course.value.effective_minutes = data.effective_minutes
     ElMessage.success(`本章已完成，课程进度 ${data.progress}%`)
   } catch (error) {
     ElMessage.error(error.message)
@@ -245,7 +294,29 @@ const toggleCommentLike = async (comment) => {
   }
 }
 
-onMounted(fetchDetail)
+const startHeartbeat = () => {
+  heartbeatTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return
+    if (!course.value?.can_learn) return
+    const chapterId = activeChapterId.value || course.value.last_chapter_id
+    if (!chapterId) return
+    reportEvent({
+      event_type: 'heartbeat',
+      chapter_id: chapterId,
+      duration_sec: 30,
+      position_sec: course.value.last_position_sec || 0,
+    })
+  }, 30000)
+}
+
+onMounted(async () => {
+  await fetchDetail()
+  startHeartbeat()
+})
+
+onUnmounted(() => {
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
+})
 </script>
 
 <template>
@@ -313,7 +384,7 @@ onMounted(fetchDetail)
                   <strong>{{ course.progress }}%</strong>
                 </div>
                 <el-progress :percentage="course.progress" :stroke-width="8" :show-text="false" />
-                <span class="minutes">累计学习 {{ course.study_minutes }} 分钟</span>
+                <span class="minutes">累计学习 {{ course.effective_minutes || course.study_minutes }} 分钟（有效学习）</span>
               </div>
 
               <div class="action-row">
@@ -344,6 +415,14 @@ onMounted(fetchDetail)
                   <el-icon><ChatDotRound /></el-icon>
                   问 AI 助教
                 </el-button>
+              </div>
+
+              <div v-if="course.can_learn && course.last_chapter_id" class="resume-row">
+                <span>
+                  上次学习：{{ course.last_chapter_title || '最近章节' }}
+                  <em v-if="course.effective_minutes">已累计 {{ course.effective_minutes }} 分钟</em>
+                </span>
+                <el-button size="small" plain type="primary" @click="resumeLearning">继续学习</el-button>
               </div>
             </div>
           </div>
@@ -395,7 +474,11 @@ onMounted(fetchDetail)
                 <span class="catalog-tip">完成章节后点击「标记完成」累计进度</span>
               </div>
               <div class="chapter-list">
-                <div v-for="(chapter, index) in course.chapters" :key="chapter.id" class="chapter-row">
+                <div
+                  v-for="(chapter, index) in course.chapters"
+                  :key="chapter.id"
+                  :class="['chapter-row', { active: activeChapterId === chapter.id }]"
+                >
                   <span class="chapter-index">{{ String(index + 1).padStart(2, '0') }}</span>
                   <span class="chapter-type" :class="chapter.content_type">{{ contentLabels[chapter.content_type] }}</span>
                   <span class="chapter-title">{{ chapter.title }}</span>
@@ -403,6 +486,9 @@ onMounted(fetchDetail)
                     <el-icon><Clock /></el-icon>
                     {{ chapter.duration_min }} 分钟
                   </span>
+                  <el-button v-if="course.can_learn" link size="small" @click="startChapter(chapter)">
+                    学习
+                  </el-button>
                   <span v-if="completed.includes(chapter.id)" class="chapter-done">
                     <el-icon><CircleCheck /></el-icon>
                     已完成
@@ -827,6 +913,26 @@ onMounted(fetchDetail)
   color: var(--zx-muted-fg);
 }
 
+.resume-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px dashed var(--zx-border);
+  border-radius: 10px;
+  background: #f8fbff;
+  font-size: 12.5px;
+  color: var(--zx-muted-fg);
+}
+
+.resume-row em {
+  margin-left: 8px;
+  font-style: normal;
+  color: var(--zx-accent);
+}
+
 .progress-row {
   margin-bottom: 16px;
   max-width: 520px;
@@ -979,6 +1085,11 @@ onMounted(fetchDetail)
 
 .chapter-row:last-child {
   border-bottom: none;
+}
+
+.chapter-row.active {
+  background: #f0f6ff;
+  border-radius: 10px;
 }
 
 .chapter-index {

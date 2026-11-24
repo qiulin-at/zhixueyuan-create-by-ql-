@@ -14,11 +14,13 @@ from ..models import (
     CourseMaterial,
     Enrollment,
     Favorite,
+    LearningEvent,
     LearningRecord,
     Order,
     User,
+    utcnow,
 )
-from ..schemas import CommentIn, ProgressIn, ReplyIn
+from ..schemas import CommentIn, LearningEventsIn, ProgressIn, ReplyIn
 from ..services.notifications import notify_course_comment
 from ..utils import ok, paginated
 
@@ -192,6 +194,9 @@ def get_course(
     favorited = False
     progress = 0
     study_minutes = 0
+    effective_minutes = 0
+    last_chapter_id = None
+    last_position_sec = 0
     if current is not None:
         favorited = (
             db.query(Favorite).filter(Favorite.user_id == current.id, Favorite.course_id == course.id).first()
@@ -205,6 +210,9 @@ def get_course(
         if record is not None:
             progress = record.progress
             study_minutes = record.study_minutes
+            effective_minutes = record.effective_minutes
+            last_chapter_id = record.last_chapter_id
+            last_position_sec = record.last_position_sec
     try:
         objectives = json.loads(course.objective) if course.objective else []
     except (TypeError, ValueError):
@@ -254,6 +262,10 @@ def get_course(
             "chapter_count": len(chapters),
             "progress": progress,
             "study_minutes": study_minutes,
+            "effective_minutes": effective_minutes,
+            "last_chapter_id": last_chapter_id,
+            "last_chapter_title": chapter_titles.get(last_chapter_id, ""),
+            "last_position_sec": last_position_sec,
         }
     )
     return ok(detail)
@@ -344,19 +356,126 @@ def get_progress(
         .first()
     )
     if record is None:
-        return ok({"course_id": course_id, "progress": 0, "study_minutes": 0, "completed_chapters": []})
+        return ok(
+            {
+                "course_id": course_id,
+                "progress": 0,
+                "study_minutes": 0,
+                "effective_minutes": 0,
+                "completed_chapters": [],
+                "last_chapter_id": None,
+                "last_chapter_title": "",
+                "last_position_sec": 0,
+            }
+        )
     try:
         completed = json.loads(record.completed_chapters) if record.completed_chapters else []
     except (TypeError, ValueError):
         completed = []
+    chapter = db.get(Chapter, record.last_chapter_id) if record.last_chapter_id else None
     return ok(
         {
             "course_id": course_id,
             "progress": record.progress,
             "study_minutes": record.study_minutes,
+            "effective_minutes": record.effective_minutes,
             "completed_chapters": completed,
+            "last_chapter_id": record.last_chapter_id,
+            "last_chapter_title": chapter.title if chapter else "",
+            "last_position_sec": record.last_position_sec,
+            "last_accessed_at": record.last_accessed_at.isoformat() if record.last_accessed_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         }
+    )
+
+
+@router.post("/{course_id}/events")
+def report_learning_events(
+    course_id: int,
+    payload: LearningEventsIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None or course.status == "offline":
+        raise HTTPException(status_code=404, detail="课程不存在或已下架")
+    if current.role != "student":
+        raise HTTPException(status_code=403, detail="仅学生可上报学习事件")
+    _ensure_enrollment(db, current, course)
+
+    chapters = {
+        chapter.id: chapter
+        for chapter in db.query(Chapter).filter(Chapter.course_id == course.id).all()
+    }
+    record = (
+        db.query(LearningRecord)
+        .filter(LearningRecord.user_id == current.id, LearningRecord.course_id == course.id)
+        .first()
+    )
+    if record is None:
+        record = LearningRecord(user_id=current.id, course_id=course.id, completed_chapters="[]")
+        db.add(record)
+        db.flush()
+    try:
+        completed = set(json.loads(record.completed_chapters) if record.completed_chapters else [])
+    except (TypeError, ValueError):
+        completed = set()
+
+    for event in payload.events:
+        if event.chapter_id is not None and event.chapter_id not in chapters:
+            raise HTTPException(status_code=400, detail="章节不属于该课程")
+        duration = min(event.duration_sec, 120) if event.event_type == "heartbeat" else 0
+        db.add(
+            LearningEvent(
+                user_id=current.id,
+                course_id=course.id,
+                chapter_id=event.chapter_id,
+                event_type=event.event_type,
+                duration_sec=duration,
+                meta=json.dumps({"position_sec": event.position_sec}, ensure_ascii=False),
+            )
+        )
+        if event.chapter_id is not None:
+            record.last_chapter_id = event.chapter_id
+        if event.position_sec:
+            record.last_position_sec = event.position_sec
+        if event.event_type == "complete_chapter" and event.chapter_id is not None:
+            completed.add(event.chapter_id)
+        record.last_accessed_at = utcnow()
+
+    record.completed_chapters = json.dumps(sorted(completed))
+    record.progress = round(len(completed) / len(chapters) * 100) if chapters else 0
+    db.add(record)
+    db.flush()
+
+    total_seconds = (
+        db.query(func.coalesce(func.sum(LearningEvent.duration_sec), 0))
+        .filter(
+            LearningEvent.user_id == current.id,
+            LearningEvent.course_id == course.id,
+            LearningEvent.event_type == "heartbeat",
+        )
+        .scalar()
+        or 0
+    )
+    record.effective_minutes = round(total_seconds / 60)
+    record.study_minutes = max(record.study_minutes, record.effective_minutes)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    chapter = db.get(Chapter, record.last_chapter_id) if record.last_chapter_id else None
+    return ok(
+        {
+            "course_id": course.id,
+            "progress": record.progress,
+            "study_minutes": record.study_minutes,
+            "effective_minutes": record.effective_minutes,
+            "completed_chapters": sorted(completed),
+            "last_chapter_id": record.last_chapter_id,
+            "last_chapter_title": chapter.title if chapter else "",
+            "last_position_sec": record.last_position_sec,
+        },
+        message="学习记录已更新",
     )
 
 
@@ -395,6 +514,17 @@ def update_progress(
     record.completed_chapters = json.dumps(sorted(completed))
     record.progress = round(len(completed) / total_chapters * 100) if total_chapters else 0
     record.study_minutes = max(0, record.study_minutes + payload.minutes)
+    record.last_accessed_at = utcnow()
+    db.add(
+        LearningEvent(
+            user_id=current.id,
+            course_id=course_id,
+            chapter_id=payload.chapter_id,
+            event_type="complete_chapter",
+            duration_sec=0,
+            meta=json.dumps({"minutes": payload.minutes}, ensure_ascii=False),
+        )
+    )
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -403,7 +533,10 @@ def update_progress(
             "course_id": course_id,
             "progress": record.progress,
             "study_minutes": record.study_minutes,
+            "effective_minutes": record.effective_minutes,
             "completed_chapters": sorted(completed),
+            "last_chapter_id": record.last_chapter_id,
+            "last_position_sec": record.last_position_sec,
         },
         message="学习进度已更新",
     )

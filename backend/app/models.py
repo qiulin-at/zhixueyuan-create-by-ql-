@@ -86,7 +86,23 @@ class LearningRecord(Base):
     study_minutes: Mapped[int] = mapped_column(Integer, default=0)
     completed_chapters: Mapped[str] = mapped_column(Text, default="[]")
     last_chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_position_sec: Mapped[int] = mapped_column(Integer, default=0)
+    effective_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LearningEvent(Base):
+    __tablename__ = "learning_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(24), index=True)
+    duration_sec: Mapped[int] = mapped_column(Integer, default=0)
+    meta: Mapped[str] = mapped_column(Text, default="{}")
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class Comment(Base):

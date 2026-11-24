@@ -53,6 +53,17 @@ class ProgressIn(BaseModel):
     minutes: int = Field(default=10, ge=0, le=600)
 
 
+class LearningEventIn(BaseModel):
+    event_type: str = Field(pattern="^(enter_chapter|heartbeat|complete_chapter)$")
+    chapter_id: int | None = None
+    duration_sec: int = Field(default=0, ge=0, le=3600)
+    position_sec: int = Field(default=0, ge=0, le=86400)
+
+
+class LearningEventsIn(BaseModel):
+    events: list[LearningEventIn] = Field(min_length=1, max_length=50)
+
+
 class CommentIn(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
     rating: int = Field(default=5, ge=1, le=5)

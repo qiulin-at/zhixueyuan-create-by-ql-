@@ -59,6 +59,7 @@ export const courseApi = {
   detail: (id) => api.get(`/courses/${id}`),
   enroll: (id) => api.post(`/courses/${id}/enroll`),
   materials: (id) => api.get(`/courses/${id}/materials`),
+  reportEvents: (id, payload) => api.post(`/courses/${id}/events`, payload),
   toggleFavorite: (id) => api.post(`/courses/${id}/favorite`),
   getProgress: (id) => api.get(`/courses/${id}/progress`),
   updateProgress: (id, payload) => api.put(`/courses/${id}/progress`, payload),
