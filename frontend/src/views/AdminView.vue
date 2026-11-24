@@ -31,7 +31,15 @@ const applyStatusLabel = { applied: '已投递', interview: '面试中', offer: 
 const applyStatusTag = { applied: 'info', interview: 'warning', offer: 'success', rejected: 'danger' }
 
 const stats = ref(null)
-const loading = reactive({ stats: false, courses: false, users: false, orders: false, applications: false })
+const loading = reactive({
+  stats: false,
+  courses: false,
+  users: false,
+  orders: false,
+  applications: false,
+  students: false,
+  audit: false,
+})
 const loaded = reactive({ users: false, orders: false, applications: false })
 
 const tab = ref('courses')
@@ -40,6 +48,28 @@ const courses = reactive({ items: [], total: 0, page: 1, keyword: '', status: ''
 const users = reactive({ items: [], total: 0, page: 1, keyword: '' })
 const orders = reactive({ items: [], total: 0, page: 1 })
 const applications = reactive({ items: [], total: 0, page: 1 })
+const auditLogs = reactive({ items: [], total: 0, page: 1, action: '', target_type: '' })
+const studentScope = reactive({
+  options: [],
+  courseId: null,
+  courseTitle: '',
+  summary: { students: 0, avg_progress: 0, total_minutes: 0 },
+  items: [],
+})
+
+const auditActionLabel = {
+  'user.role': '调整角色',
+  'user.status': '启停账号',
+  'course.status': '课程上下架',
+  'course.create': '新建课程',
+  'course.update': '编辑课程',
+  'course.delete': '删除课程',
+  'chapter.create': '新增章节',
+  'chapter.update': '编辑章节',
+  'chapter.delete': '删除章节',
+  'order.status': '订单状态',
+}
+const auditTargetLabel = { user: '用户', course: '课程', chapter: '章节', order: '订单' }
 
 const courseIndex = ref(new Map())
 const userIndex = ref(new Map())
@@ -131,6 +161,64 @@ const loadApplications = async () => {
   }
 }
 
+const loadStudentScopeOptions = async () => {
+  try {
+    const data = await adminApi.courses({ page: 1, page_size: 50 })
+    studentScope.options = data.items
+    if (!studentScope.courseId && data.items.length) {
+      studentScope.courseId = data.items[0].id
+    }
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const loadStudentScope = async () => {
+  if (!studentScope.courseId) return
+  loading.students = true
+  try {
+    const data = await adminApi.courseStudents(studentScope.courseId)
+    studentScope.courseTitle = data.course_title
+    studentScope.summary = data.summary
+    studentScope.items = data.items
+  } catch (error) {
+    studentScope.items = []
+    ElMessage.error(error.message)
+  } finally {
+    loading.students = false
+  }
+}
+
+const loadAuditLogs = async () => {
+  loading.audit = true
+  try {
+    const data = await adminApi.operationLogs({
+      action: auditLogs.action,
+      target_type: auditLogs.target_type,
+      page: auditLogs.page,
+      page_size: PAGE_SIZE,
+    })
+    auditLogs.items = data.items
+    auditLogs.total = data.total
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    loading.audit = false
+  }
+}
+
+const formatDetail = (detail) => {
+  if (!detail || typeof detail !== 'object') return '—'
+  const parts = []
+  if (detail.title) parts.push(detail.title)
+  if (detail.fields?.length) parts.push(`字段：${detail.fields.join(', ')}`)
+  if (detail.before !== undefined || detail.after !== undefined) {
+    parts.push(`${detail.before ?? '—'} → ${detail.after ?? '—'}`)
+  }
+  if (detail.course_id) parts.push(`课程 #${detail.course_id}`)
+  return parts.join('；') || JSON.stringify(detail)
+}
+
 // 订单/申请接口只返 ID，这里额外拉一份索引用于展示名称（失败则回退为 ID）
 const loadIndexes = async () => {
   if (indexReady.value) return
@@ -154,6 +242,11 @@ const onTabChange = async (name) => {
     if (!loaded.orders) await loadOrders()
   }
   if (name === 'applications' && !loaded.applications) await loadApplications()
+  if (name === 'students') {
+    if (!studentScope.options.length) await loadStudentScopeOptions()
+    await loadStudentScope()
+  }
+  if (name === 'audit' && isAdmin.value) await loadAuditLogs()
 }
 
 const searchCourses = () => {
@@ -404,6 +497,8 @@ const refreshAll = async () => {
     if (loaded.orders) await loadOrders()
     if (loaded.applications) await loadApplications()
   }
+  if (tab.value === 'students') await loadStudentScope()
+  if (tab.value === 'audit' && isAdmin.value) await loadAuditLogs()
   ElMessage.success('数据已刷新')
 }
 
@@ -455,7 +550,7 @@ onMounted(async () => {
           <span class="eyebrow">ADMIN CONSOLE</span>
           <h1>后台管理</h1>
           <p v-if="isAdmin">平台运营数据，以及用户、课程、订单与职位申请的统一管理入口。</p>
-          <p v-else>教师工作台：仅可查看并上下架本人创建的课程。</p>
+          <p v-else>教师工作台：查看本人课程学情，维护课程内容与上下架。</p>
         </div>
         <div class="hero-side">
           <div class="role-pill" :class="role">
@@ -573,6 +668,68 @@ onMounted(async () => {
                 :total="courses.total"
                 @current-change="loadCourses"
               />
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane label="学情" name="students">
+            <div class="toolbar">
+              <el-select
+                v-model="studentScope.courseId"
+                class="toolbar-select-wide"
+                placeholder="选择课程"
+                @change="loadStudentScope"
+              >
+                <el-option
+                  v-for="course in studentScope.options"
+                  :key="course.id"
+                  :label="course.title"
+                  :value="course.id"
+                />
+              </el-select>
+              <el-button :icon="Refresh" :loading="loading.students" @click="loadStudentScope">
+                刷新学情
+              </el-button>
+              <span class="toolbar-tip">仅展示已报名或有学习记录的学生</span>
+            </div>
+
+            <div class="scope-summary">
+              <div class="scope-card">
+                <span>学生数</span>
+                <strong>{{ studentScope.summary.students }}</strong>
+              </div>
+              <div class="scope-card">
+                <span>平均进度</span>
+                <strong>{{ studentScope.summary.avg_progress }}%</strong>
+              </div>
+              <div class="scope-card">
+                <span>累计学习</span>
+                <strong>{{ studentScope.summary.total_minutes }} <em>分钟</em></strong>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <el-table v-loading="loading.students" :data="studentScope.items" row-key="user_id">
+                <el-table-column prop="user_id" label="ID" width="64" />
+                <el-table-column prop="user_name" label="学生" min-width="130" />
+                <el-table-column prop="major" label="专业" min-width="160" show-overflow-tooltip />
+                <el-table-column label="进度" width="150">
+                  <template #default="{ row }">
+                    <el-progress :percentage="row.progress" :stroke-width="8" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="学习时长" width="110" align="right">
+                  <template #default="{ row }">{{ row.study_minutes }} 分钟</template>
+                </el-table-column>
+                <el-table-column label="最近章节" min-width="180" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.last_chapter_title || '—' }}</template>
+                </el-table-column>
+                <el-table-column label="最近学习" width="140">
+                  <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
+                </el-table-column>
+                <template #empty>
+                  <div class="table-empty">该课程还没有学习记录</div>
+                </template>
+              </el-table>
             </div>
           </el-tab-pane>
 
@@ -751,6 +908,80 @@ onMounted(async () => {
                 :page-size="PAGE_SIZE"
                 :total="applications.total"
                 @current-change="loadApplications"
+              />
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane v-if="isAdmin" label="操作日志" name="audit">
+            <div class="toolbar">
+              <el-select
+                v-model="auditLogs.action"
+                class="toolbar-select-wide"
+                placeholder="全部动作"
+                clearable
+                @change="loadAuditLogs"
+              >
+                <el-option
+                  v-for="(label, key) in auditActionLabel"
+                  :key="key"
+                  :label="label"
+                  :value="key"
+                />
+              </el-select>
+              <el-select
+                v-model="auditLogs.target_type"
+                class="toolbar-select"
+                placeholder="全部对象"
+                clearable
+                @change="loadAuditLogs"
+              >
+                <el-option
+                  v-for="(label, key) in auditTargetLabel"
+                  :key="key"
+                  :label="label"
+                  :value="key"
+                />
+              </el-select>
+              <el-button type="primary" class="zx-gradient-button" @click="loadAuditLogs">
+                查询
+              </el-button>
+              <span class="toolbar-tip">共 {{ auditLogs.total }} 条</span>
+            </div>
+
+            <div class="table-wrap">
+              <el-table v-loading="loading.audit" :data="auditLogs.items" row-key="id">
+                <el-table-column label="时间" width="150">
+                  <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+                </el-table-column>
+                <el-table-column prop="actor_name" label="操作者" width="120" />
+                <el-table-column label="角色" width="90">
+                  <template #default="{ row }">{{ roleLabel[row.actor_role] || row.actor_role }}</template>
+                </el-table-column>
+                <el-table-column label="动作" width="130">
+                  <template #default="{ row }">{{ auditActionLabel[row.action] || row.action }}</template>
+                </el-table-column>
+                <el-table-column label="对象" width="110">
+                  <template #default="{ row }">
+                    {{ auditTargetLabel[row.target_type] || row.target_type }} #{{ row.target_id ?? '—' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="详情" min-width="260" show-overflow-tooltip>
+                  <template #default="{ row }">{{ formatDetail(row.detail) }}</template>
+                </el-table-column>
+                <template #empty>
+                  <div class="table-empty">暂无操作日志</div>
+                </template>
+              </el-table>
+            </div>
+
+            <div v-if="auditLogs.total > PAGE_SIZE" class="pager">
+              <el-pagination
+                v-model:current-page="auditLogs.page"
+                background
+                layout="total, prev, pager, next"
+                :page-size="PAGE_SIZE"
+                :total="auditLogs.total"
+                @current-change="loadAuditLogs"
               />
             </div>
           </el-tab-pane>
@@ -1090,6 +1321,44 @@ onMounted(async () => {
   width: 130px;
 }
 
+.toolbar-select-wide {
+  width: 260px;
+}
+
+.scope-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.scope-card {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border: 1px solid var(--zx-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.scope-card span {
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.scope-card strong {
+  font-size: 20px;
+  color: var(--zx-fg);
+}
+
+.scope-card em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+  font-weight: 500;
+}
+
 .toolbar-tip {
   font-size: 12px;
   color: var(--zx-muted-fg);
@@ -1134,6 +1403,14 @@ onMounted(async () => {
 
   .toolbar-search {
     width: 100%;
+  }
+
+  .toolbar-select-wide {
+    width: 100%;
+  }
+
+  .scope-summary {
+    grid-template-columns: 1fr;
   }
 
   .toolbar-tip {

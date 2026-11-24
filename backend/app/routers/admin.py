@@ -1,9 +1,22 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..deps import get_db, require_role
-from ..models import Chapter, Comment, Course, Favorite, Job, JobApplication, LearningRecord, Order, User
+from ..models import (
+    Chapter,
+    Comment,
+    Course,
+    Favorite,
+    Job,
+    JobApplication,
+    LearningRecord,
+    OperationLog,
+    Order,
+    User,
+)
 from ..schemas import (
     ChapterIn,
     ChapterUpdateIn,
@@ -14,6 +27,7 @@ from ..schemas import (
     RoleIn,
     UserStatusIn,
 )
+from ..services import audit
 from ..services.notifications import notify_course_offline
 from ..utils import ok, paginated
 
@@ -84,9 +98,11 @@ def update_role(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
+    previous = user.role
     user.role = payload.role
     db.add(user)
     db.commit()
+    audit.log(db, current, "user.role", "user", user.id, {"before": previous, "after": user.role})
     return ok({"id": user.id, "role": user.role}, message="角色已更新")
 
 
@@ -102,9 +118,18 @@ def update_user_status(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
+    previous = bool(user.is_active)
     user.is_active = 1 if payload.is_active else 0
     db.add(user)
     db.commit()
+    audit.log(
+        db,
+        current,
+        "user.status",
+        "user",
+        user.id,
+        {"before": previous, "after": bool(user.is_active)},
+    )
     return ok(
         {"id": user.id, "is_active": bool(user.is_active)},
         message="账号已启用" if payload.is_active else "账号已停用",
@@ -165,6 +190,7 @@ def update_course_status(
     if payload.status == "offline" and previous != "offline":
         notify_course_offline(db, course, actor_id=current.id)
     db.commit()
+    audit.log(db, current, "course.status", "course", course.id, {"before": previous, "after": course.status})
     return ok({"id": course.id, "status": course.status}, message="课程状态已更新")
 
 
@@ -237,6 +263,7 @@ def create_course(
     db.add(course)
     db.commit()
     db.refresh(course)
+    audit.log(db, current, "course.create", "course", course.id, {"title": course.title})
     return ok({"id": course.id, "title": course.title}, message="课程已创建")
 
 
@@ -269,6 +296,7 @@ def update_course(
 
     db.add(course)
     db.commit()
+    audit.log(db, current, "course.update", "course", course.id, {"fields": sorted(data.keys())})
     return ok({"id": course.id, "title": course.title}, message="课程已更新")
 
 
@@ -291,8 +319,10 @@ def delete_course(
     db.query(Chapter).filter(Chapter.course_id == course_id).delete(synchronize_session=False)
     db.query(Comment).filter(Comment.course_id == course_id).delete(synchronize_session=False)
     db.query(Favorite).filter(Favorite.course_id == course_id).delete(synchronize_session=False)
+    title = course.title
     db.delete(course)
     db.commit()
+    audit.log(db, current, "course.delete", "course", course_id, {"title": title})
     return ok({"id": course_id}, message="课程已删除")
 
 
@@ -312,6 +342,14 @@ def create_chapter(
     db.add(chapter)
     db.commit()
     db.refresh(chapter)
+    audit.log(
+        db,
+        current,
+        "chapter.create",
+        "chapter",
+        chapter.id,
+        {"course_id": course_id, "title": chapter.title},
+    )
     return ok(_serialize_chapter(chapter), message="章节已添加")
 
 
@@ -334,6 +372,14 @@ def update_chapter(
         setattr(chapter, field, value)
     db.add(chapter)
     db.commit()
+    audit.log(
+        db,
+        current,
+        "chapter.update",
+        "chapter",
+        chapter.id,
+        {"course_id": chapter.course_id, "fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+    )
     return ok(_serialize_chapter(chapter), message="章节已更新")
 
 
@@ -351,8 +397,11 @@ def delete_chapter(
         raise HTTPException(status_code=404, detail="课程不存在")
     _ensure_course_access(course, current)
 
+    title = chapter.title
+    course_id = chapter.course_id
     db.delete(chapter)
     db.commit()
+    audit.log(db, current, "chapter.delete", "chapter", chapter_id, {"course_id": course_id, "title": title})
     return ok({"id": chapter_id}, message="章节已删除")
 
 
@@ -459,9 +508,11 @@ def update_order_status(
             status_code=409,
             detail=f"订单状态不能从 {order.status} 变更为 {payload.status}",
         )
+    previous = order.status
     order.status = payload.status
     db.add(order)
     db.commit()
+    audit.log(db, current, "order.status", "order", order.id, {"before": previous, "after": order.status})
     return ok({"id": order.id, "status": order.status}, message="订单状态已更新")
 
 
@@ -489,6 +540,112 @@ def list_applications(
         for application, job, user in rows
     ]
     return ok(paginated(items, total, page, page_size))
+
+
+def _parse_detail(raw: str) -> dict:
+    try:
+        value = json.loads(raw or "{}")
+        return value if isinstance(value, dict) else {"value": value}
+    except (TypeError, ValueError):
+        return {"raw": raw or ""}
+
+
+@router.get("/operation-logs")
+def list_operation_logs(
+    action: str = "",
+    target_type: str = "",
+    actor_id: int | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    query = db.query(OperationLog)
+    if action.strip():
+        query = query.filter(OperationLog.action == action.strip())
+    if target_type.strip():
+        query = query.filter(OperationLog.target_type == target_type.strip())
+    if actor_id:
+        query = query.filter(OperationLog.actor_id == actor_id)
+    total = query.count()
+    rows = query.order_by(OperationLog.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    actor_ids = {row.actor_id for row in rows}
+    actors = (
+        {user.id: user for user in db.query(User).filter(User.id.in_(actor_ids)).all()}
+        if actor_ids
+        else {}
+    )
+    items = [
+        {
+            "id": row.id,
+            "actor_id": row.actor_id,
+            "actor_name": (actors[row.actor_id].nickname or actors[row.actor_id].username)
+            if row.actor_id in actors
+            else f"用户 #{row.actor_id}",
+            "actor_role": row.actor_role,
+            "action": row.action,
+            "target_type": row.target_type,
+            "target_id": row.target_id,
+            "detail": _parse_detail(row.detail),
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+    return ok(paginated(items, total, page, page_size))
+
+
+@router.get("/teacher/courses/{course_id}/students")
+def course_students(
+    course_id: int,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+
+    rows = (
+        db.query(LearningRecord, User)
+        .join(User, LearningRecord.user_id == User.id)
+        .filter(LearningRecord.course_id == course_id)
+        .order_by(LearningRecord.progress.desc(), LearningRecord.updated_at.desc())
+        .all()
+    )
+    chapter_ids = {record.last_chapter_id for record, _ in rows if record.last_chapter_id}
+    chapters = (
+        {chapter.id: chapter.title for chapter in db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all()}
+        if chapter_ids
+        else {}
+    )
+    items = [
+        {
+            "user_id": user.id,
+            "user_name": user.nickname or user.username,
+            "major": user.major,
+            "progress": record.progress,
+            "study_minutes": record.study_minutes,
+            "last_chapter_id": record.last_chapter_id,
+            "last_chapter_title": chapters.get(record.last_chapter_id, ""),
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+        }
+        for record, user in rows
+    ]
+    total_minutes = sum(item["study_minutes"] for item in items)
+    avg_progress = round(sum(item["progress"] for item in items) / len(items)) if items else 0
+    return ok(
+        {
+            "course_id": course.id,
+            "course_title": course.title,
+            "summary": {
+                "students": len(items),
+                "avg_progress": avg_progress,
+                "total_minutes": total_minutes,
+            },
+            "items": items,
+        }
+    )
 
 
 @router.get("/stats")

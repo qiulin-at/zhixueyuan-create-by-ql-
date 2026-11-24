@@ -108,6 +108,8 @@ export const adminApi = {
   orderDetail: (id) => api.get(`/admin/orders/${id}`),
   updateOrderStatus: (id, status) => api.patch(`/admin/orders/${id}/status`, { status }),
   applications: (params) => api.get('/admin/applications', { params }),
+  courseStudents: (id) => api.get(`/admin/teacher/courses/${id}/students`),
+  operationLogs: (params) => api.get('/admin/operation-logs', { params }),
 }
 
 export const notificationApi = {

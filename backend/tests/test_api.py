@@ -858,4 +858,110 @@ def test_course_payload_validation(client):
         client.post("/api/admin/courses", json={"title": "有效课程", "level": "expert"}, headers=admin).status_code
         == 422
     )
+
+
+def test_operation_log_permissions(client):
+    assert client.get("/api/admin/operation-logs").status_code == 401
+    student = auth(login(client))
+    assert client.get("/api/admin/operation-logs", headers=student).status_code == 403
+    teacher = auth(login(client, "teacher_wang"))
+    assert client.get("/api/admin/operation-logs", headers=teacher).status_code == 403
+
+
+def test_operation_log_records_course_actions(client):
+    admin = auth(login(client, "admin"))
+    created = client.post(
+        "/api/admin/courses", json={"title": "TEST 审计课程"}, headers=admin
+    ).json()["data"]
+    course_id = created["id"]
+    try:
+        client.put(
+            f"/api/admin/courses/{course_id}",
+            json={"title": "TEST 审计课程改"},
+            headers=admin,
+        )
+    finally:
+        client.delete(f"/api/admin/courses/{course_id}", headers=admin)
+
+    data = client.get(
+        "/api/admin/operation-logs",
+        params={"action": "course.create", "page_size": 100},
+        headers=admin,
+    ).json()["data"]
+    item = next(row for row in data["items"] if row["target_id"] == course_id)
+    assert item["target_type"] == "course"
+    assert item["actor_role"] == "admin"
+    assert item["actor_name"]
+    assert item["detail"]["title"] == "TEST 审计课程"
+
+    updates = client.get(
+        "/api/admin/operation-logs",
+        params={"action": "course.update", "page_size": 100},
+        headers=admin,
+    ).json()["data"]
+    update_item = next(row for row in updates["items"] if row["target_id"] == course_id)
+    assert "title" in update_item["detail"]["fields"]
+
+    deletes = client.get(
+        "/api/admin/operation-logs",
+        params={"action": "course.delete", "page_size": 100},
+        headers=admin,
+    ).json()["data"]
+    assert any(row["target_id"] == course_id for row in deletes["items"])
+
+
+def test_operation_log_records_user_role_change(client):
+    admin = auth(login(client, "admin"))
+    users = client.get("/api/admin/users", params={"keyword": "teacher_li"}, headers=admin).json()["data"]["items"]
+    target = next(user for user in users if user["username"] == "teacher_li")
+    original = target["role"]
+    other = "admin" if original != "admin" else "teacher"
+    client.patch(f"/api/admin/users/{target['id']}/role", json={"role": other}, headers=admin)
+    try:
+        data = client.get(
+            "/api/admin/operation-logs",
+            params={"action": "user.role", "page_size": 100},
+            headers=admin,
+        ).json()["data"]
+        item = next(row for row in data["items"] if row["target_id"] == target["id"])
+        assert item["detail"]["before"] == original
+        assert item["detail"]["after"] == other
+    finally:
+        client.patch(f"/api/admin/users/{target['id']}/role", json={"role": original}, headers=admin)
+
+
+def test_operation_log_filters_and_pagination(client):
+    admin = auth(login(client, "admin"))
+    data = client.get(
+        "/api/admin/operation-logs",
+        params={"target_type": "course", "page": 1, "page_size": 5},
+        headers=admin,
+    ).json()["data"]
+    assert data["page"] == 1 and data["page_size"] == 5
+    assert all(item["target_type"] == "course" for item in data["items"])
+    assert (
+        client.get("/api/admin/operation-logs", params={"page_size": 101}, headers=admin).status_code
+        == 422
+    )
+
+
+def test_teacher_course_students_scope(client):
+    teacher = auth(login(client, "teacher_wang"))
+    data = client.get("/api/admin/teacher/courses/1/students", headers=teacher).json()["data"]
+    assert data["course_id"] == 1
+    assert data["course_title"]
+    assert {"students", "avg_progress", "total_minutes"} <= set(data["summary"])
+    for item in data["items"]:
+        assert {"user_id", "user_name", "progress", "study_minutes"} <= set(item)
+        assert "email" not in item
+        assert "username" not in item
+
+    assert client.get("/api/admin/teacher/courses/2/students", headers=teacher).status_code == 403
+
+    student = auth(login(client))
+    assert client.get("/api/admin/teacher/courses/1/students", headers=student).status_code == 403
+
+    admin = auth(login(client, "admin"))
+    assert client.get("/api/admin/teacher/courses/2/students", headers=admin).status_code == 200
+    assert client.get("/api/admin/teacher/courses/999999/students", headers=admin).status_code == 404
     assert client.get("/api/admin/orders/999999", headers=admin).status_code == 404

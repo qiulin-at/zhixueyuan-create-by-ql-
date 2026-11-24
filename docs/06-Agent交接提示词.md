@@ -19,16 +19,16 @@
 | 工作目录 | `C:\Users\qiulin\Desktop\项目二 面向教育平台的智能体开发`（Windows + Git Bash） |
 | 后端 | FastAPI + SQLAlchemy 2.x，Python 3.14，依赖在根目录 `.venv` |
 | 前端 | Vue 3.5 + Vite 6 + Element Plus 2.8.8 + Pinia + Router + Axios + ECharts（按需）+ marked + DOMPurify 3.2.4 |
-| 数据库 | 代码模型 **16 张表**（新增 `course_materials`、`comment_replies`、`comment_likes`）；测试库 16 张，演示库 `backend/zhixueyun.db` 仍 13 张，需跑 `seed_materials.py` 或让后端 `create_all` 建表 |
-| 接口 | **45 条路径 / 53 个操作**（`/openapi.json` 可核对；含 SSE 与社区接口） |
+| 数据库 | 代码模型 **17 张表**（G1 新增 `operation_logs`）；测试库与演示库均 17 张；`backend/migrate_v2.py` 可幂等补表 |
+| 接口 | **47 条路径 / 55 个操作**（`/openapi.json` 可核对；G1 新增审计日志与教师学情） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
-| 测试 | **57 passed**，`pytest-cov` 行覆盖 **90%**（1424 语句 / 137 未覆盖） |
+| 测试 | **62 passed**，`pytest-cov` 行覆盖 **91%**（1499 语句 / 135 未覆盖） |
 | 仓库 | `git` 已初始化并推送 GitHub：`https://github.com/qiulin-at/zhixueyuan-create-by-ql-.git`（public，`main`；当前与 `origin/main` 同步，D2 推送提交 `a0be17b`，**13 条功能提交**，另有文档/口径回填提交见 `git log`）；`output/` 不入公开仓库（本地交付）；历史已重写移除 `output/`，旧历史备份 `.codeartsdoer/git-backup/zhixueyun-before-rewrite.bundle` |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
 | 学习社区 | 课程评价 + 回复/楼中楼（`parent_id`）+ 点赞（一人一次） |
 | 课程资料 | **20 条**（4 门课各 5 段）；测试库已导入，演示库/MySQL 需跑 `seed_materials.py` 补 |
-| 缺口 | 41 项 **41 已实现 / 0 部分 / 0 缺失**（见 `docs/06-缺口清单.md` §6）；二期 11 批为规划态，见 §11 |
+| 缺口 | 一期 41 项 **41 已实现 / 0 部分 / 0 缺失**（见 `docs/06-缺口清单.md` §6）；二期 G1 已完成，G2–J2 为规划态，见 §11 |
 
 已完成的能力（不要重复开发，只需维护）：
 
@@ -36,7 +36,7 @@
 - 课程：三维筛选、四维排序、模糊搜索、详情、收藏、章节进度、评论（一人一课一条）、回复/楼中楼/点赞
 - AI：多轮答疑（含课程资料 RAG Top-3 检索与引用）、学习路径、作业批改、学习报告（Mock / 在线双模式，在线失败自动降级）
 - 就业：职位筛选、详情、申请（防重复）
-- 后台：统计、用户角色与启停、课程 CRUD 与章节维护、讲师列表与指派、订单详情与状态机、职位申请列表
+- 后台：统计、用户角色与启停、课程 CRUD 与章节维护、讲师列表与指派、订单详情与状态机、职位申请列表、操作日志（G1）、教师课程学情（G1）
 - 通知：收藏课程更新、下架、7 天停滞提醒、未读角标与已读、SSE 实时未读数（60s 轮询兜底）
 - 个人中心：资料、收藏、我的课程、我的订单
 - 工程：pytest 57 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
@@ -85,6 +85,8 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 **先做只读审计（禁止改代码）**：读上表文档与 `backend/app/routers/`、`backend/app/models.py`、`backend/tests/test_api.py`、`frontend/src/views/AdminView.vue`、`frontend/src/views/ProfileView.vue`；跑三条验证命令；核对接口/表/用例数是否与本节一致。**然后停下，等用户确认从哪批开始。**
 
 后续按 `docs/08` 顺序推进，一次一批：
+
+- **二期 G1：权限矩阵与操作审计**——✅ 已完成（2026-11-24）：`operation_logs` + 教师学情 + 前端双 Tab；62 passed / 91%；下一步 G2。
 
 - **批次 C：Docker Compose**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 D/F/E。
 - **批次 D：RAG**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 F/E。
