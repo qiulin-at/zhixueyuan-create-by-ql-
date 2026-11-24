@@ -23,7 +23,7 @@
 | 接口 | **47 条路径 / 55 个操作**（`/openapi.json` 可核对；G1 新增审计日志与教师学情） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
 | 测试 | **62 passed**，`pytest-cov` 行覆盖 **91%**（1499 语句 / 135 未覆盖） |
-| 仓库 | `git` 已初始化并推送 GitHub：`https://github.com/qiulin-at/zhixueyuan-create-by-ql-.git`（public，`main`；当前与 `origin/main` 同步，D2 推送提交 `a0be17b`，**13 条功能提交**，另有文档/口径回填提交见 `git log`）；`output/` 不入公开仓库（本地交付）；历史已重写移除 `output/`，旧历史备份 `.codeartsdoer/git-backup/zhixueyun-before-rewrite.bundle` |
+| 仓库 | `git` 已初始化并推送 GitHub：`https://github.com/qiulin-at/zhixueyuan-create-by-ql-.git`（public，`main`；当前与 `origin/main` 同步，D2 推送提交 `a0be17b`，**14 条功能提交**，另有文档/口径回填提交见 `git log`）；`output/` 不入公开仓库（本地交付）；历史已重写移除 `output/`，旧历史备份 `.codeartsdoer/git-backup/zhixueyun-before-rewrite.bundle` |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
 | 学习社区 | 课程评价 + 回复/楼中楼（`parent_id`）+ 点赞（一人一次） |
