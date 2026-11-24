@@ -1647,3 +1647,117 @@ def test_study_report_knowledge_from_submissions(client):
         assert report["stats"]["avg_assignment_score"] is not None
     finally:
         client.delete(f"/api/admin/assignments/{assignment_id}", headers=teacher)
+
+def test_llm_config_masked_and_encrypted(client):
+    headers = auth(login(client))
+    empty = client.get("/api/users/me/llm-config", headers=headers).json()["data"]
+    assert empty["configured"] is False
+
+    raw_key = "sk-test-1234567890abcdef"
+    saved = client.put(
+        "/api/users/me/llm-config",
+        json={
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "api_key": raw_key,
+            "enabled": True,
+        },
+        headers=headers,
+    ).json()["data"]
+    assert saved["configured"] is True
+    assert saved["masked_key"] and raw_key not in saved["masked_key"]
+
+    from app.database import SessionLocal
+    from app.models import UserLLMConfig
+    from app.services.crypto import decrypt_secret
+
+    me = client.get("/api/users/me", headers=headers).json()["data"]
+    db = SessionLocal()
+    try:
+        record = db.query(UserLLMConfig).filter(UserLLMConfig.user_id == me["id"]).first()
+        assert record is not None
+        assert raw_key not in record.api_key_cipher
+        assert decrypt_secret(record.api_key_cipher) == raw_key
+    finally:
+        db.close()
+
+    current = client.get("/api/users/me/llm-config", headers=headers).json()["data"]
+    assert raw_key not in str(current)
+    client.delete("/api/users/me/llm-config", headers=headers)
+
+
+def test_llm_config_rejects_unsafe_urls_and_provider(client):
+    headers = auth(login(client))
+    for base_url in ("http://127.0.0.1:8000/v1", "https://localhost/v1", "https://10.0.0.1/v1"):
+        response = client.put(
+            "/api/users/me/llm-config",
+            json={
+                "provider": "custom",
+                "base_url": base_url,
+                "model": "demo",
+                "api_key": "sk-x",
+                "enabled": True,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 400, base_url
+    assert (
+        client.put(
+            "/api/users/me/llm-config",
+            json={"provider": "unknown", "model": "demo"},
+            headers=headers,
+        ).status_code
+        == 422
+    )
+    client.delete("/api/users/me/llm-config", headers=headers)
+
+
+def test_llm_config_test_connection(client, monkeypatch):
+    headers = auth(login(client))
+    client.put(
+        "/api/users/me/llm-config",
+        json={
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "api_key": "sk-test-key",
+            "enabled": True,
+        },
+        headers=headers,
+    )
+    monkeypatch.setattr(
+        "app.routers.users.llm_gateway.test_user_config",
+        lambda config: (True, "连接成功"),
+    )
+    data = client.post("/api/users/me/llm-config/test", headers=headers).json()["data"]
+    assert data["ok"] is True
+
+    current = client.get("/api/users/me/llm-config", headers=headers).json()["data"]
+    assert current["last_test_ok"] is True
+    client.delete("/api/users/me/llm-config", headers=headers)
+
+
+def test_llm_config_delete_and_ai_fallback(client):
+    headers = auth(login(client))
+    client.put(
+        "/api/users/me/llm-config",
+        json={
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "api_key": "sk-test-key",
+            "enabled": True,
+        },
+        headers=headers,
+    )
+    deleted = client.delete("/api/users/me/llm-config", headers=headers).json()["data"]
+    assert deleted["configured"] is False
+
+    chat = client.post(
+        "/api/ai/chat",
+        json={"message": "HDFS 的副本机制是怎么工作的？", "course_id": 2},
+        headers=headers,
+    ).json()["data"]
+    assert chat["llm_source"] == "mock"
+    assert chat["mode"] == "mock"

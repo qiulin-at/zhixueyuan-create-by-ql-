@@ -52,6 +52,10 @@ export const userApi = {
   favorites: () => api.get('/users/me/favorites'),
   learning: () => api.get('/users/me/learning'),
   orders: () => api.get('/users/me/orders'),
+  llmConfig: () => api.get('/users/me/llm-config'),
+  saveLLMConfig: (payload) => api.put('/users/me/llm-config', payload),
+  deleteLLMConfig: () => api.delete('/users/me/llm-config'),
+  testLLMConfig: () => api.post('/users/me/llm-config/test'),
 }
 
 export const courseApi = {

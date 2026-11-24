@@ -25,6 +25,7 @@ from ..services.llm import llm_gateway
 from ..services.mock_engine import mock_answer, mock_grade, mock_learning_path_structured, mock_study_report
 from ..services.prompts import GRADE_SYSTEM, LEARNING_PATH_JSON_SYSTEM, REPORT_SYSTEM, TUTOR_SYSTEM
 from ..services.rag import format_materials, format_reference_line, retrieve_materials
+from ..services.user_llm import resolve_user_config
 from ..utils import ok
 
 logger = logging.getLogger("zhixueyun.ai")
@@ -100,8 +101,13 @@ def chat(payload: ChatIn, current: User = Depends(get_current_user), db: Session
         )
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend({"role": item.role, "content": item.content} for item in history)
-    answer = llm_gateway.chat(messages, temperature=0.6, max_tokens=900)
-    mode = "online"
+    answer, llm_source = llm_gateway.chat_ex(
+        messages,
+        temperature=0.6,
+        max_tokens=900,
+        user_config=resolve_user_config(db, current),
+    )
+    mode = "online" if llm_source in ("user", "platform") else "mock"
     if answer is None:
         answer = mock_answer(payload.message, course_title, chapter_title)
         mode = "mock"
@@ -135,6 +141,7 @@ def chat(payload: ChatIn, current: User = Depends(get_current_user), db: Session
             "message_id": assistant.id,
             "answer": answer,
             "mode": mode,
+            "llm_source": llm_source,
             "insufficient": insufficient,
             "citations": citations,
             "references": format_reference_line(course_title, materials) if materials else "",
@@ -433,15 +440,16 @@ def learning_path(
         completed_courses=json.dumps(snapshot["completed_courses"], ensure_ascii=False),
         available_courses=json.dumps(available, ensure_ascii=False),
     )
-    content = llm_gateway.chat(
+    content, llm_source = llm_gateway.chat_ex(
         [
             {"role": "system", "content": prompt},
             {"role": "user", "content": f"请为「{payload.goal}」生成路径 JSON"},
         ],
         temperature=0.4,
         max_tokens=1600,
+        user_config=resolve_user_config(db, current),
     )
-    mode = "online"
+    mode = "online" if llm_source in ("user", "platform") else "mock"
     raw = _parse_json_payload(content)
     if raw is None:
         raw = mock_learning_path_structured(payload.goal, payload.weekly_hours, available, snapshot)
@@ -467,6 +475,7 @@ def learning_path(
     data = _path_dict(path)
     data["content"] = _render_path_markdown(data)
     data["mode"] = mode
+    data["llm_source"] = llm_source
     return ok(data, message="学习路径已生成")
 
 
@@ -521,9 +530,13 @@ def update_learning_path(
 
 
 @router.post("/grade")
-def grade(payload: GradeIn, current: User = Depends(get_current_user)):
+def grade(
+    payload: GradeIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     prompt = GRADE_SYSTEM.format(title=payload.title, language=payload.language)
-    content = llm_gateway.chat(
+    content, llm_source = llm_gateway.chat_ex(
         [
             {"role": "system", "content": prompt},
             {"role": "user", "content": payload.code},
@@ -531,8 +544,9 @@ def grade(payload: GradeIn, current: User = Depends(get_current_user)):
         temperature=0.2,
         max_tokens=1200,
         json_mode=True,
+        user_config=resolve_user_config(db, current),
     )
-    mode = "online"
+    mode = "online" if llm_source in ("user", "platform") else "mock"
     parsed = None
     if content is not None:
         try:
@@ -548,7 +562,7 @@ def grade(payload: GradeIn, current: User = Depends(get_current_user)):
     if parsed is None:
         parsed = json.loads(mock_grade(payload.title, payload.language, payload.code))
         mode = "mock"
-    return ok({"result": parsed, "mode": mode})
+    return ok({"result": parsed, "mode": mode, "llm_source": llm_source})
 
 
 def _report_window(period: str):
@@ -688,15 +702,16 @@ def study_report(
         "\n注意：以下统计数字由系统计算，禁止新增或修改任何数字；"
         "建议必须指向具体课程、章节或作业。"
     )
-    analysis = llm_gateway.chat(
+    analysis, llm_source = llm_gateway.chat_ex(
         [
             {"role": "system", "content": prompt},
             {"role": "user", "content": "请基于给定统计生成学习报告分析"},
         ],
         temperature=0.5,
         max_tokens=1000,
+        user_config=resolve_user_config(db, current),
     )
-    mode = "online"
+    mode = "online" if llm_source in ("user", "platform") else "mock"
     if analysis is None:
         analysis = mock_study_report(
             {
@@ -730,5 +745,6 @@ def study_report(
             "analysis": analysis,
             "content": content,
             "mode": mode,
+            "llm_source": llm_source,
         }
     )

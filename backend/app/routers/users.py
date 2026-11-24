@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db
-from ..models import Course, Favorite, LearningRecord, Order, User
-from ..schemas import UserOut, UserUpdateIn
+from ..models import Course, Favorite, LearningRecord, Order, User, UserLLMConfig, utcnow
+from ..schemas import LLMConfigIn, UserOut, UserUpdateIn
 from ..security import hash_password
+from ..services.llm import llm_gateway
+from ..services.user_llm import config_public, resolve_user_config, save_config
 from ..utils import ok
 
 router = APIRouter(prefix="/api/users", tags=["用户"])
@@ -123,3 +125,74 @@ def list_orders(current: User = Depends(get_current_user), db: Session = Depends
             "total_amount": round(sum(item["amount"] for item in items), 2),
         }
     )
+
+@router.get("/me/llm-config")
+def get_llm_config(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    config = db.query(UserLLMConfig).filter(UserLLMConfig.user_id == current.id).first()
+    if config is None:
+        return ok(
+            {
+                "configured": False,
+                "enabled": False,
+                "provider": "",
+                "base_url": "",
+                "model": "",
+                "masked_key": "",
+                "last_tested_at": None,
+                "last_test_ok": None,
+            }
+        )
+    return ok(config_public(config))
+
+
+@router.put("/me/llm-config")
+def update_llm_config(
+    payload: LLMConfigIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        config = save_config(
+            db,
+            current,
+            payload.provider,
+            payload.base_url,
+            payload.model,
+            payload.api_key,
+            payload.enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ok(config_public(config), message="模型配置已保存")
+
+
+@router.delete("/me/llm-config")
+def delete_llm_config(
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = db.query(UserLLMConfig).filter(UserLLMConfig.user_id == current.id).first()
+    if config is not None:
+        db.delete(config)
+        db.commit()
+    return ok({"configured": False}, message="模型配置已清除")
+
+
+@router.post("/me/llm-config/test")
+def test_llm_config(
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    config = resolve_user_config(db, current)
+    if config is None:
+        raise HTTPException(status_code=400, detail="请先保存并启用模型配置")
+    passed, message = llm_gateway.test_user_config(config)
+    record = db.query(UserLLMConfig).filter(UserLLMConfig.user_id == current.id).first()
+    if record is not None:
+        record.last_tested_at = utcnow()
+        record.last_test_ok = 1 if passed else 0
+        db.add(record)
+        db.commit()
+    if not passed:
+        raise HTTPException(status_code=400, detail=message)
+    return ok({"ok": True, "message": message})

@@ -250,3 +250,13 @@ class SubmissionIn(BaseModel):
 class SubmissionReviewIn(BaseModel):
     final_score: float = Field(ge=0, le=100)
     comment: str = Field(default="", max_length=500)
+
+class LLMConfigIn(BaseModel):
+    provider: str = Field(
+        default="deepseek",
+        pattern="^(deepseek|dashscope|zhipu|moonshot|openai|custom)$",
+    )
+    base_url: str = Field(default="", max_length=255)
+    model: str = Field(default="", max_length=80)
+    api_key: str = Field(default="", max_length=500)
+    enabled: bool = True

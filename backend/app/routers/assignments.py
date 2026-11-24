@@ -12,6 +12,7 @@ from ..services import audit, sandbox
 from ..services.llm import llm_gateway
 from ..services.mock_engine import mock_grade
 from ..services.prompts import GRADE_SYSTEM
+from ..services.user_llm import resolve_user_config
 from ..utils import ok
 
 router = APIRouter(prefix="/api", tags=["作业与批改"])
@@ -139,9 +140,13 @@ def _submission_dict(submission: Submission, include_code=True) -> dict:
     return data
 
 
-def _ai_review(assignment: Assignment, code: str) -> tuple[dict, str]:
+def _ai_review(
+    assignment: Assignment,
+    code: str,
+    user_config: dict | None = None,
+) -> tuple[dict, str, str]:
     prompt = GRADE_SYSTEM.format(title=assignment.title, language=assignment.language)
-    content = llm_gateway.chat(
+    content, llm_source = llm_gateway.chat_ex(
         [
             {"role": "system", "content": prompt},
             {"role": "user", "content": code},
@@ -149,13 +154,15 @@ def _ai_review(assignment: Assignment, code: str) -> tuple[dict, str]:
         temperature=0.2,
         max_tokens=1200,
         json_mode=True,
+        user_config=user_config,
     )
-    mode = "online"
+    mode = "online" if llm_source in ("user", "platform") else "mock"
     parsed = _parse_json(content)
     if not parsed:
         parsed = _parse_json(mock_grade(assignment.title, assignment.language, code))
         mode = "mock"
-    return parsed, mode
+        llm_source = "mock"
+    return parsed, mode, llm_source
 
 
 def _latest_submissions(db: Session, user_id: int, assignment_ids: list[int]) -> dict[int, Submission]:
@@ -248,7 +255,9 @@ def submit_assignment(
     if sandbox_result.get("available") and total:
         objective_score = round((sandbox_result.get("passed") or 0) / total * 100, 1)
 
-    ai_feedback, ai_mode = _ai_review(assignment, payload.code)
+    ai_feedback, ai_mode, ai_source = _ai_review(
+        assignment, payload.code, resolve_user_config(db, current)
+    )
     try:
         ai_score = float(ai_feedback.get("score")) if ai_feedback.get("score") is not None else None
     except (TypeError, ValueError):
@@ -282,6 +291,7 @@ def submit_assignment(
         "total": total,
     }
     data["ai_mode"] = ai_mode
+    data["ai_source"] = ai_source
     data["assignment_title"] = assignment.title
     return ok(data, message="作业已提交")
 

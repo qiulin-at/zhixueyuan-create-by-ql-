@@ -19,6 +19,34 @@ const orders = reactive({ items: [], totalAmount: 0, loading: false, loaded: fal
 const orderStatusLabel = { pending: '待支付', paid: '已支付', refunded: '已退款', cancelled: '已取消' }
 const orderStatusTag = { pending: 'warning', paid: 'success', refunded: 'info', cancelled: 'info' }
 
+const llm = reactive({
+  loading: false,
+  saving: false,
+  testing: false,
+  configured: false,
+  enabled: true,
+  provider: 'deepseek',
+  base_url: 'https://api.deepseek.com/v1',
+  model: 'deepseek-chat',
+  api_key: '',
+  masked_key: '',
+  last_tested_at: null,
+  last_test_ok: null,
+})
+const llmProviders = [
+  { value: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  {
+    value: 'dashscope',
+    label: '通义千问（DashScope）',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
+  },
+  { value: 'zhipu', label: '智谱 GLM', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  { value: 'moonshot', label: 'Moonshot Kimi', base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { value: 'openai', label: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { value: 'custom', label: '自定义（OpenAI 兼容）', base_url: '', model: '' },
+]
+
 const avatarText = computed(() => (userStore.displayName || '同').slice(0, 1))
 const formatDate = (value) => (value ? value.slice(0, 10) : '—')
 const formatMoney = (value) => `¥ ${Number(value || 0).toFixed(2)}`
@@ -105,6 +133,94 @@ const onTabChange = (name) => {
   if (name === 'favorites') loadFavorites()
   if (name === 'learning') loadLearning()
   if (name === 'orders') loadOrders()
+  if (name === 'llm') loadLLM()
+}
+
+const loadLLM = async () => {
+  if (llm.loading) return
+  llm.loading = true
+  try {
+    const data = await userApi.llmConfig()
+    Object.assign(llm, {
+      configured: data.configured,
+      enabled: data.enabled,
+      provider: data.provider || 'deepseek',
+      base_url: data.base_url || 'https://api.deepseek.com/v1',
+      model: data.model || 'deepseek-chat',
+      masked_key: data.masked_key || '',
+      last_tested_at: data.last_tested_at,
+      last_test_ok: data.last_test_ok,
+      api_key: '',
+    })
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    llm.loading = false
+  }
+}
+
+const onProviderChange = (value) => {
+  const preset = llmProviders.find((item) => item.value === value)
+  if (preset && preset.base_url) {
+    llm.base_url = preset.base_url
+    llm.model = preset.model
+  }
+}
+
+const saveLLM = async () => {
+  if (!llm.configured && !llm.api_key.trim()) {
+    ElMessage.warning('首次配置请填写 API Key')
+    return
+  }
+  llm.saving = true
+  try {
+    const data = await userApi.saveLLMConfig({
+      provider: llm.provider,
+      base_url: llm.base_url,
+      model: llm.model,
+      api_key: llm.api_key,
+      enabled: llm.enabled,
+    })
+    Object.assign(llm, { ...data, api_key: '' })
+    ElMessage.success('模型配置已保存')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    llm.saving = false
+  }
+}
+
+const testLLM = async () => {
+  llm.testing = true
+  try {
+    await userApi.testLLMConfig()
+    llm.last_test_ok = true
+    llm.last_tested_at = new Date().toISOString()
+    ElMessage.success('连接成功')
+  } catch (error) {
+    llm.last_test_ok = false
+    llm.last_tested_at = new Date().toISOString()
+    ElMessage.error(error.message)
+  } finally {
+    llm.testing = false
+  }
+}
+
+const clearLLM = async () => {
+  try {
+    await userApi.deleteLLMConfig()
+    Object.assign(llm, {
+      configured: false,
+      enabled: false,
+      masked_key: '',
+      api_key: '',
+      last_tested_at: null,
+      last_test_ok: null,
+    })
+    ElMessage.success('模型配置已清除')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
 }
 
 onMounted(async () => {
@@ -247,6 +363,77 @@ onMounted(async () => {
             <el-empty v-else-if="orders.loaded" description="还没有订单" />
           </div>
         </el-tab-pane>
+
+        <el-tab-pane label="AI 模型" name="llm">
+          <div v-loading="llm.loading" class="panel llm-panel">
+            <div class="llm-head">
+              <div>
+                <h2>AI 模型接入</h2>
+                <p>接入你自己订阅的 OpenAI 兼容模型；Key 加密存储，只用于你的 AI 请求。</p>
+              </div>
+              <el-switch v-model="llm.enabled" active-text="启用" inactive-text="停用" />
+            </div>
+
+            <el-alert
+              type="warning"
+              :closable="false"
+              show-icon
+              title="调用失败会自动回退平台模型，再回退 Mock；页面会提示实际使用的来源。"
+            />
+
+            <el-form label-position="top" class="llm-form">
+              <el-form-item label="厂商">
+                <el-select v-model="llm.provider" style="width: 100%" @change="onProviderChange">
+                  <el-option
+                    v-for="item in llmProviders"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="Base URL">
+                <el-input v-model="llm.base_url" placeholder="https://api.example.com/v1" maxlength="255" />
+              </el-form-item>
+              <el-form-item label="模型名称">
+                <el-input v-model="llm.model" placeholder="deepseek-chat" maxlength="80" />
+              </el-form-item>
+              <el-form-item label="API Key">
+                <el-input
+                  v-model="llm.api_key"
+                  type="password"
+                  show-password
+                  maxlength="500"
+                  :placeholder="
+                    llm.configured
+                      ? `已保存：${llm.masked_key}（留空保持不变）`
+                      : '粘贴你的 API Key'
+                  "
+                />
+              </el-form-item>
+              <div class="llm-actions">
+                <el-button type="primary" class="zx-gradient-button" :loading="llm.saving" @click="saveLLM">
+                  保存配置
+                </el-button>
+                <el-button :loading="llm.testing" :disabled="!llm.configured" @click="testLLM">
+                  测试连接
+                </el-button>
+                <el-button type="danger" plain :disabled="!llm.configured" @click="clearLLM">
+                  清除
+                </el-button>
+              </div>
+              <p v-if="llm.last_tested_at" class="llm-status">
+                最近测试：{{ formatDate(llm.last_tested_at) }} ·
+                <span :class="llm.last_test_ok ? 'ok' : 'fail'">
+                  {{ llm.last_test_ok ? '连接成功' : '连接失败' }}
+                </span>
+              </p>
+              <p class="llm-note">
+                Key 不会回显，前端只看到掩码；Base URL 仅允许 https 公网域名，禁止内网地址。
+              </p>
+            </el-form>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </div>
   </div>
@@ -346,6 +533,62 @@ onMounted(async () => {
 .tips {
   margin: 6px 0 0 88px;
   font-size: 12px;
+  color: #94a3b8;
+}
+
+.llm-panel {
+  padding: 10px 2px 4px;
+}
+
+.llm-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.llm-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.llm-head p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--zx-muted-fg);
+}
+
+.llm-form {
+  max-width: 560px;
+  margin-top: 14px;
+}
+
+.llm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.llm-status {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+}
+
+.llm-status .ok {
+  color: #059669;
+}
+
+.llm-status .fail {
+  color: #dc2626;
+}
+
+.llm-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.7;
   color: #94a3b8;
 }
 
