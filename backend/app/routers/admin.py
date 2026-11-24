@@ -9,13 +9,17 @@ from ..models import (
     Chapter,
     Comment,
     Course,
+    CourseMaterial,
+    Enrollment,
     Favorite,
     Job,
     JobApplication,
     LearningRecord,
     OperationLog,
     Order,
+    TaxonomyTerm,
     User,
+    utcnow,
 )
 from ..schemas import (
     ChapterIn,
@@ -24,7 +28,12 @@ from ..schemas import (
     CourseStatusIn,
     CourseUpdateIn,
     OrderStatusIn,
+    ResourceIn,
+    ResourceUpdateIn,
+    ReviewIn,
     RoleIn,
+    TaxonomyIn,
+    TaxonomyUpdateIn,
     UserStatusIn,
 )
 from ..services import audit
@@ -165,6 +174,7 @@ def admin_list_courses(
             "status": course.status,
             "study_count": course.study_count,
             "rating": round(course.rating, 1),
+            "review_status": course.review_status,
             "created_at": course.created_at.isoformat() if course.created_at else None,
         }
         for course in rows
@@ -192,6 +202,63 @@ def update_course_status(
     db.commit()
     audit.log(db, current, "course.status", "course", course.id, {"before": previous, "after": course.status})
     return ok({"id": course.id, "status": course.status}, message="课程状态已更新")
+
+
+@router.patch("/courses/{course_id}/submit-review")
+def submit_course_review(
+    course_id: int,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    previous = course.review_status
+    course.review_status = "pending"
+    course.reviewer_id = None
+    course.reviewed_at = None
+    db.add(course)
+    db.commit()
+    audit.log(
+        db,
+        current,
+        "course.submit_review",
+        "course",
+        course.id,
+        {"before": previous, "after": "pending"},
+    )
+    return ok({"id": course.id, "review_status": course.review_status}, message="已提交审核")
+
+
+@router.patch("/courses/{course_id}/review")
+def review_course(
+    course_id: int,
+    payload: ReviewIn,
+    current: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    previous = course.review_status
+    course.review_status = payload.review_status
+    course.reviewer_id = current.id
+    course.reviewed_at = utcnow()
+    db.add(course)
+    db.commit()
+    audit.log(
+        db,
+        current,
+        "course.review",
+        "course",
+        course.id,
+        {"before": previous, "after": course.review_status, "comment": payload.comment},
+    )
+    return ok(
+        {"id": course.id, "review_status": course.review_status},
+        message="审核已通过" if payload.review_status == "published" else "课程已驳回",
+    )
 
 
 @router.get("/courses/{course_id}")
@@ -226,7 +293,13 @@ def admin_course_detail(
             "teacher_name": (teacher.nickname or teacher.username) if teacher else "",
             "intro": course.intro,
             "description": course.description,
+            "audience": course.audience,
+            "prerequisite": course.prerequisite,
             "status": course.status,
+            "review_status": course.review_status,
+            "reviewer_id": course.reviewer_id,
+            "reviewed_at": course.reviewed_at.isoformat() if course.reviewed_at else None,
+            "last_updated_at": course.last_updated_at.isoformat() if course.last_updated_at else None,
             "chapters": [_serialize_chapter(chapter) for chapter in chapters],
         }
     )
@@ -258,6 +331,9 @@ def create_course(
         teacher_id=teacher_id,
         intro=payload.intro.strip(),
         description=payload.description,
+        audience=payload.audience.strip(),
+        prerequisite=payload.prerequisite,
+        review_status="published" if current.role == "admin" else "pending",
         status=payload.status,
     )
     db.add(course)
@@ -403,6 +479,129 @@ def delete_chapter(
     db.commit()
     audit.log(db, current, "chapter.delete", "chapter", chapter_id, {"course_id": course_id, "title": title})
     return ok({"id": chapter_id}, message="章节已删除")
+
+
+def _chapter_for_admin(db: Session, chapter_id: int, current: User) -> Chapter:
+    chapter = db.get(Chapter, chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    course = db.get(Course, chapter.course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    return chapter
+
+
+def _resource_dict(material: CourseMaterial) -> dict:
+    return {
+        "id": material.id,
+        "course_id": material.course_id,
+        "chapter_id": material.chapter_id,
+        "title": material.title,
+        "resource_type": material.resource_type,
+        "url": material.url,
+        "content": material.content,
+        "sort": material.sort,
+    }
+
+
+@router.get("/chapters/{chapter_id}/materials")
+def list_chapter_materials(
+    chapter_id: int,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    chapter = _chapter_for_admin(db, chapter_id, current)
+    rows = (
+        db.query(CourseMaterial)
+        .filter(CourseMaterial.chapter_id == chapter.id, CourseMaterial.kind == "resource")
+        .order_by(CourseMaterial.sort.asc(), CourseMaterial.id.asc())
+        .all()
+    )
+    return ok({"items": [_resource_dict(row) for row in rows], "total": len(rows)})
+
+
+@router.post("/chapters/{chapter_id}/materials")
+def create_chapter_material(
+    chapter_id: int,
+    payload: ResourceIn,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    chapter = _chapter_for_admin(db, chapter_id, current)
+    material = CourseMaterial(
+        course_id=chapter.course_id,
+        chapter_id=chapter.id,
+        title=payload.title.strip(),
+        content=payload.content,
+        kind="resource",
+        resource_type=payload.resource_type,
+        url=payload.url.strip(),
+        sort=payload.sort,
+    )
+    db.add(material)
+    db.commit()
+    db.refresh(material)
+    audit.log(
+        db,
+        current,
+        "resource.create",
+        "material",
+        material.id,
+        {"chapter_id": chapter.id, "title": material.title},
+    )
+    return ok(_resource_dict(material), message="资源已添加")
+
+
+@router.put("/materials/{material_id}")
+def update_material(
+    material_id: int,
+    payload: ResourceUpdateIn,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    material = db.get(CourseMaterial, material_id)
+    if material is None or material.kind != "resource":
+        raise HTTPException(status_code=404, detail="资源不存在")
+    course = db.get(Course, material.course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if field in ("title", "url") and isinstance(value, str):
+            value = value.strip()
+        setattr(material, field, value)
+    db.add(material)
+    db.commit()
+    audit.log(
+        db,
+        current,
+        "resource.update",
+        "material",
+        material.id,
+        {"fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+    )
+    return ok(_resource_dict(material), message="资源已更新")
+
+
+@router.delete("/materials/{material_id}")
+def delete_material(
+    material_id: int,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    material = db.get(CourseMaterial, material_id)
+    if material is None or material.kind != "resource":
+        raise HTTPException(status_code=404, detail="资源不存在")
+    course = db.get(Course, material.course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    title = material.title
+    db.delete(material)
+    db.commit()
+    audit.log(db, current, "resource.delete", "material", material_id, {"title": title})
+    return ok({"id": material_id}, message="资源已删除")
 
 
 @router.get("/teachers")
@@ -664,5 +863,100 @@ def get_stats(
             "comments": db.query(func.count(Comment.id)).scalar() or 0,
             "jobs": db.query(func.count(Job.id)).scalar() or 0,
             "applications": db.query(func.count(JobApplication.id)).scalar() or 0,
+            "enrollments": db.query(func.count(Enrollment.id)).scalar() or 0,
         }
     )
+
+
+def _taxonomy_dict(term: TaxonomyTerm) -> dict:
+    return {
+        "id": term.id,
+        "kind": term.kind,
+        "code": term.code,
+        "name": term.name,
+        "parent_code": term.parent_code,
+        "sort": term.sort,
+        "enabled": bool(term.enabled),
+    }
+
+
+@router.get("/taxonomy")
+def list_taxonomy(
+    kind: str = "",
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    query = db.query(TaxonomyTerm)
+    if kind.strip():
+        query = query.filter(TaxonomyTerm.kind == kind.strip())
+    rows = query.order_by(
+        TaxonomyTerm.kind.asc(), TaxonomyTerm.sort.asc(), TaxonomyTerm.id.asc()
+    ).all()
+    return ok({"items": [_taxonomy_dict(term) for term in rows], "total": len(rows)})
+
+
+@router.post("/taxonomy")
+def create_taxonomy(
+    payload: TaxonomyIn,
+    current: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    code = payload.code.strip()
+    existing = (
+        db.query(TaxonomyTerm)
+        .filter(TaxonomyTerm.kind == payload.kind, TaxonomyTerm.code == code)
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="该分类编码已存在")
+    term = TaxonomyTerm(
+        kind=payload.kind,
+        code=code,
+        name=payload.name.strip(),
+        parent_code=(payload.parent_code or "").strip() or None,
+        sort=payload.sort,
+        enabled=1 if payload.enabled else 0,
+    )
+    db.add(term)
+    db.commit()
+    db.refresh(term)
+    audit.log(
+        db,
+        current,
+        "taxonomy.create",
+        "taxonomy",
+        term.id,
+        {"kind": term.kind, "code": term.code},
+    )
+    return ok(_taxonomy_dict(term), message="分类已添加")
+
+
+@router.put("/taxonomy/{term_id}")
+def update_taxonomy(
+    term_id: int,
+    payload: TaxonomyUpdateIn,
+    current: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    term = db.get(TaxonomyTerm, term_id)
+    if term is None:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "enabled":
+            value = 1 if value else 0
+        elif field == "parent_code":
+            value = (value or "").strip() or None
+        elif field == "name":
+            value = value.strip()
+        setattr(term, field, value)
+    db.add(term)
+    db.commit()
+    audit.log(
+        db,
+        current,
+        "taxonomy.update",
+        "taxonomy",
+        term.id,
+        {"fields": sorted(payload.model_dump(exclude_unset=True).keys())},
+    )
+    return ok(_taxonomy_dict(term), message="分类已更新")

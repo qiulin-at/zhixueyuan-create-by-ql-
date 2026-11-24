@@ -57,6 +57,8 @@ export const userApi = {
 export const courseApi = {
   list: (params) => api.get('/courses', { params }),
   detail: (id) => api.get(`/courses/${id}`),
+  enroll: (id) => api.post(`/courses/${id}/enroll`),
+  materials: (id) => api.get(`/courses/${id}/materials`),
   toggleFavorite: (id) => api.post(`/courses/${id}/favorite`),
   getProgress: (id) => api.get(`/courses/${id}/progress`),
   updateProgress: (id, payload) => api.put(`/courses/${id}/progress`, payload),
@@ -87,6 +89,7 @@ export const jobApi = {
 
 export const metaApi = {
   filters: () => api.get('/meta/filters'),
+  taxonomy: () => api.get('/meta/taxonomy'),
 }
 
 export const adminApi = {
@@ -110,6 +113,15 @@ export const adminApi = {
   applications: (params) => api.get('/admin/applications', { params }),
   courseStudents: (id) => api.get(`/admin/teacher/courses/${id}/students`),
   operationLogs: (params) => api.get('/admin/operation-logs', { params }),
+  submitReview: (id) => api.patch(`/admin/courses/${id}/submit-review`),
+  reviewCourse: (id, payload) => api.patch(`/admin/courses/${id}/review`, payload),
+  chapterMaterials: (chapterId) => api.get(`/admin/chapters/${chapterId}/materials`),
+  createMaterial: (chapterId, payload) => api.post(`/admin/chapters/${chapterId}/materials`, payload),
+  updateMaterial: (id, payload) => api.put(`/admin/materials/${id}`, payload),
+  deleteMaterial: (id) => api.delete(`/admin/materials/${id}`),
+  taxonomy: (params) => api.get('/admin/taxonomy', { params }),
+  createTaxonomy: (payload) => api.post('/admin/taxonomy', payload),
+  updateTaxonomy: (id, payload) => api.put(`/admin/taxonomy/${id}`, payload),
 }
 
 export const notificationApi = {

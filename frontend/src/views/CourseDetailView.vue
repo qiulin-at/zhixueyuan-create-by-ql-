@@ -20,6 +20,7 @@ const commentText = ref('')
 const commentRating = ref(5)
 const submitting = ref(false)
 const marking = ref(null)
+const enrolling = ref(false)
 const replyOpen = ref({})
 const replyText = ref({})
 const repliesMap = ref({})
@@ -32,6 +33,7 @@ const levelLabels = {
 }
 const typeLabels = { theory: '理论课程', practice: '实训课程', certification: '认证课程' }
 const contentLabels = { video: '视频', doc: '课件', lab: '实验' }
+const resourceLabels = { video: '视频', doc: '文档', code: '代码', link: '链接', lab: '实验' }
 const coverThemes = {
   人工智能: 'cover-ai',
   大数据: 'cover-bigdata',
@@ -101,6 +103,26 @@ const toggleFavorite = async () => {
   }
 }
 
+const enroll = async () => {
+  if (!userStore.isLoggedIn) {
+    requireLogin()
+    return
+  }
+  enrolling.value = true
+  try {
+    const data = await courseApi.enroll(course.value.id)
+    course.value.is_enrolled = data.enrolled
+    course.value.can_learn = data.enrolled
+    ElMessage.success('报名成功，课程资源已解锁')
+    const detail = await courseApi.detail(course.value.id)
+    course.value.materials = detail.materials || []
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    enrolling.value = false
+  }
+}
+
 const startLearning = () => {
   if (!userStore.isLoggedIn) {
     requireLogin()
@@ -113,6 +135,10 @@ const startLearning = () => {
 const markCompleted = async (chapter) => {
   if (!userStore.isLoggedIn) {
     requireLogin()
+    return
+  }
+  if (!course.value.can_learn) {
+    ElMessage.warning('请先报名课程后再记录学习进度')
     return
   }
   marking.value = chapter.id
@@ -281,7 +307,7 @@ onMounted(fetchDetail)
                 <div><strong>{{ totalMinutes }}</strong><span>总时长 / 分钟</span></div>
               </div>
 
-              <div v-if="userStore.isLoggedIn" class="progress-row">
+              <div v-if="userStore.isLoggedIn && course.can_learn" class="progress-row">
                 <div class="progress-text">
                   <span>学习进展</span>
                   <strong>{{ course.progress }}%</strong>
@@ -291,8 +317,24 @@ onMounted(fetchDetail)
               </div>
 
               <div class="action-row">
-                <el-button type="primary" size="large" class="zx-gradient-button" @click="startLearning">
-                  立即学习
+                <el-button
+                  v-if="course.can_learn"
+                  type="primary"
+                  size="large"
+                  class="zx-gradient-button"
+                  @click="startLearning"
+                >
+                  继续学习
+                </el-button>
+                <el-button
+                  v-else
+                  type="primary"
+                  size="large"
+                  class="zx-gradient-button"
+                  :loading="enrolling"
+                  @click="enroll"
+                >
+                  {{ course.is_free ? '免费报名学习' : `报名学习 ¥${course.price}` }}
                 </el-button>
                 <el-button size="large" :class="{ favorited: course.is_favorite }" @click="toggleFavorite">
                   <el-icon><StarFilled /></el-icon>
@@ -324,6 +366,17 @@ onMounted(fetchDetail)
                       <span>{{ item }}</span>
                     </li>
                   </ul>
+
+                  <div v-if="course.audience || course.prerequisite" class="course-extra">
+                    <div v-if="course.audience">
+                      <strong>适用对象</strong>
+                      <span>{{ course.audience }}</span>
+                    </div>
+                    <div v-if="course.prerequisite">
+                      <strong>先修要求</strong>
+                      <span>{{ course.prerequisite }}</span>
+                    </div>
+                  </div>
                 </div>
 
                 <aside class="teacher-card">
@@ -362,6 +415,19 @@ onMounted(fetchDetail)
                   >
                     标记完成
                   </el-button>
+                </div>
+              </div>
+
+              <div v-if="course.materials && course.materials.length" class="resource-block">
+                <h3 class="block-title">学习资源</h3>
+                <div v-for="item in course.materials" :key="item.id" class="resource-row">
+                  <span class="resource-type">{{ resourceLabels[item.resource_type] || item.resource_type }}</span>
+                  <div class="resource-main">
+                    <strong>{{ item.title }}</strong>
+                    <span v-if="item.chapter_title" class="resource-chapter">{{ item.chapter_title }}</span>
+                  </div>
+                  <a v-if="item.url" :href="item.url" target="_blank" rel="noopener">打开资源</a>
+                  <span v-else class="resource-content">{{ item.content }}</span>
                 </div>
               </div>
             </el-tab-pane>
@@ -462,6 +528,82 @@ onMounted(fetchDetail)
 </template>
 
 <style scoped>
+.course-extra {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.course-extra div {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.course-extra strong {
+  min-width: 68px;
+  color: var(--zx-fg);
+}
+
+.course-extra span {
+  color: var(--zx-muted-fg);
+}
+
+.resource-block {
+  margin-top: 24px;
+}
+
+.resource-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid var(--zx-border);
+}
+
+.resource-type {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #0052ff;
+  background: #e8efff;
+}
+
+.resource-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.resource-main strong {
+  font-size: 13.5px;
+  color: var(--zx-fg);
+}
+
+.resource-chapter {
+  font-size: 11.5px;
+  color: var(--zx-muted-fg);
+}
+
+.resource-row a {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--zx-accent);
+}
+
+.resource-content {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--zx-muted-fg);
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .detail-page {
   min-height: 60vh;
 }

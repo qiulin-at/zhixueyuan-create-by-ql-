@@ -45,6 +45,12 @@ class Course(Base):
     rating_count: Mapped[int] = mapped_column(Integer, default=0)
     study_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="published", index=True)
+    audience: Mapped[str] = mapped_column(String(200), default="")
+    prerequisite: Mapped[str] = mapped_column(Text, default="")
+    review_status: Mapped[str] = mapped_column(String(16), default="published", index=True)
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -209,6 +215,10 @@ class CourseMaterial(Base):
     title: Mapped[str] = mapped_column(String(150))
     content: Mapped[str] = mapped_column(Text, default="")
     keywords: Mapped[str] = mapped_column(String(200), default="")
+    kind: Mapped[str] = mapped_column(String(12), default="kb", index=True)
+    resource_type: Mapped[str] = mapped_column(String(12), default="")
+    url: Mapped[str] = mapped_column(String(255), default="")
+    sort: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 class OperationLog(Base):
@@ -223,3 +233,28 @@ class OperationLog(Base):
     detail: Mapped[str] = mapped_column(Text, default="{}")
     ip: Mapped[str] = mapped_column(String(45), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+class Enrollment(Base):
+    __tablename__ = "enrollments"
+    __table_args__ = (UniqueConstraint("user_id", "course_id", name="uk_user_course_enroll"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    source: Mapped[str] = mapped_column(String(16), default="free")
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class TaxonomyTerm(Base):
+    __tablename__ = "taxonomy_terms"
+    __table_args__ = (UniqueConstraint("kind", "code", name="uk_taxonomy_code"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(24), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(60))
+    parent_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

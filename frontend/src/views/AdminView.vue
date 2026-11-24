@@ -39,6 +39,8 @@ const loading = reactive({
   applications: false,
   students: false,
   audit: false,
+  resources: false,
+  taxonomy: false,
 })
 const loaded = reactive({ users: false, orders: false, applications: false })
 
@@ -247,6 +249,7 @@ const onTabChange = async (name) => {
     await loadStudentScope()
   }
   if (name === 'audit' && isAdmin.value) await loadAuditLogs()
+  if (name === 'taxonomy' && isAdmin.value) await loadTaxonomy()
 }
 
 const searchCourses = () => {
@@ -309,6 +312,8 @@ const courseForm = reactive({
   price: 0,
   teacher_id: null,
   intro: '',
+  audience: '',
+  prerequisite: '',
   status: 'published',
 })
 const chapterDialog = reactive({
@@ -332,6 +337,8 @@ const blankCourse = () => ({
   price: 0,
   teacher_id: null,
   intro: '',
+  audience: '',
+  prerequisite: '',
   status: 'published',
 })
 
@@ -370,6 +377,8 @@ const openEditCourse = async (row) => {
       price: data.price,
       teacher_id: data.teacher_id,
       intro: data.intro,
+      audience: data.audience || '',
+      prerequisite: data.prerequisite || '',
       status: data.status,
     })
   } catch (error) {
@@ -480,6 +489,150 @@ const removeChapter = async (chapter) => {
   }
 }
 
+const reviewLabel = { draft: '未提交', pending: '待审核', published: '已通过', rejected: '已驳回' }
+const reviewTag = { draft: 'info', pending: 'warning', published: 'success', rejected: 'danger' }
+
+const changeCourseReview = async (row, status) => {
+  try {
+    await adminApi.reviewCourse(row.id, { review_status: status })
+    row.review_status = status
+    ElMessage.success(status === 'published' ? '审核已通过' : '课程已驳回')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const submitCourseReview = async (row) => {
+  try {
+    await adminApi.submitReview(row.id)
+    row.review_status = 'pending'
+    ElMessage.success('已提交审核，等待管理员处理')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const resourceDialog = reactive({
+  visible: false,
+  chapterId: null,
+  chapterTitle: '',
+  items: [],
+  loading: false,
+  saving: false,
+})
+const resourceForm = reactive({ title: '', resource_type: 'doc', url: '', content: '', sort: 1 })
+const resourceTypeLabel = { video: '视频', doc: '文档', code: '代码', link: '链接', lab: '实验' }
+
+const openResources = async (chapter) => {
+  resourceDialog.visible = true
+  resourceDialog.chapterId = chapter.id
+  resourceDialog.chapterTitle = chapter.title
+  resourceDialog.loading = true
+  try {
+    const data = await adminApi.chapterMaterials(chapter.id)
+    resourceDialog.items = data.items
+    resourceForm.sort = data.items.length + 1
+  } catch (error) {
+    resourceDialog.items = []
+    ElMessage.error(error.message)
+  } finally {
+    resourceDialog.loading = false
+  }
+}
+
+const addResource = async () => {
+  if (!resourceForm.title.trim()) {
+    ElMessage.warning('请填写资源标题')
+    return
+  }
+  resourceDialog.saving = true
+  try {
+    const item = await adminApi.createMaterial(resourceDialog.chapterId, {
+      ...resourceForm,
+      title: resourceForm.title.trim(),
+      url: resourceForm.url.trim(),
+      sort: Number(resourceForm.sort) || 0,
+    })
+    resourceDialog.items.push(item)
+    Object.assign(resourceForm, {
+      title: '',
+      resource_type: 'doc',
+      url: '',
+      content: '',
+      sort: resourceDialog.items.length + 1,
+    })
+    ElMessage.success('资源已添加')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    resourceDialog.saving = false
+  }
+}
+
+const removeResource = async (item) => {
+  try {
+    await adminApi.deleteMaterial(item.id)
+    resourceDialog.items = resourceDialog.items.filter((row) => row.id !== item.id)
+    ElMessage.success('资源已删除')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const taxonomy = reactive({ items: [], saving: false })
+const taxonomyForm = reactive({ kind: 'course_type', code: '', name: '', sort: 0 })
+const taxonomyKindLabel = {
+  course_type: '课程类型',
+  tech_system: '技术体系',
+  tech_direction: '技术方向',
+  level: '课程等级',
+}
+
+const loadTaxonomy = async () => {
+  loading.taxonomy = true
+  try {
+    const data = await adminApi.taxonomy()
+    taxonomy.items = data.items
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    loading.taxonomy = false
+  }
+}
+
+const addTaxonomy = async () => {
+  if (!taxonomyForm.code.trim() || !taxonomyForm.name.trim()) {
+    ElMessage.warning('请填写编码与名称')
+    return
+  }
+  taxonomy.saving = true
+  try {
+    const item = await adminApi.createTaxonomy({
+      ...taxonomyForm,
+      code: taxonomyForm.code.trim(),
+      name: taxonomyForm.name.trim(),
+    })
+    taxonomy.items.push(item)
+    Object.assign(taxonomyForm, { kind: taxonomyForm.kind, code: '', name: '', sort: 0 })
+    ElMessage.success('分类已添加')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    taxonomy.saving = false
+  }
+}
+
+const toggleTaxonomy = async (item) => {
+  const next = !item.enabled
+  try {
+    const updated = await adminApi.updateTaxonomy(item.id, { enabled: next })
+    item.enabled = updated.enabled
+    ElMessage.success(next ? '分类已启用' : '分类已停用')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
 const changeOrderStatus = async (row, status) => {
   try {
     await adminApi.updateOrderStatus(row.id, status)
@@ -499,6 +652,7 @@ const refreshAll = async () => {
   }
   if (tab.value === 'students') await loadStudentScope()
   if (tab.value === 'audit' && isAdmin.value) await loadAuditLogs()
+  if (tab.value === 'taxonomy' && isAdmin.value) await loadTaxonomy()
   ElMessage.success('数据已刷新')
 }
 
@@ -643,13 +797,47 @@ onMounted(async () => {
                     </el-select>
                   </template>
                 </el-table-column>
+                <el-table-column label="审核" width="96">
+                  <template #default="{ row }">
+                    <el-tag :type="reviewTag[row.review_status] || 'info'" size="small" effect="light">
+                      {{ reviewLabel[row.review_status] || row.review_status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
                 <el-table-column label="创建时间" width="132">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
                 </el-table-column>
-                <el-table-column label="操作" width="164" fixed="right">
+                <el-table-column label="操作" width="250" fixed="right">
                   <template #default="{ row }">
                     <el-button link size="small" @click="openEditCourse(row)">编辑</el-button>
                     <el-button link size="small" @click="openChapters(row)">章节</el-button>
+                    <el-button
+                      v-if="isAdmin && row.review_status === 'pending'"
+                      link
+                      size="small"
+                      type="success"
+                      @click="changeCourseReview(row, 'published')"
+                    >
+                      通过
+                    </el-button>
+                    <el-button
+                      v-if="isAdmin && row.review_status === 'pending'"
+                      link
+                      size="small"
+                      type="danger"
+                      @click="changeCourseReview(row, 'rejected')"
+                    >
+                      驳回
+                    </el-button>
+                    <el-button
+                      v-if="!isAdmin && ['pending', 'rejected'].includes(row.review_status)"
+                      link
+                      size="small"
+                      type="primary"
+                      @click="submitCourseReview(row)"
+                    >
+                      提交审核
+                    </el-button>
                     <el-button link size="small" type="danger" @click="removeCourse(row)">删除</el-button>
                   </template>
                 </el-table-column>
@@ -985,6 +1173,57 @@ onMounted(async () => {
               />
             </div>
           </el-tab-pane>
+
+          <el-tab-pane v-if="isAdmin" label="分类字典" name="taxonomy">
+            <div class="toolbar">
+              <el-select v-model="taxonomyForm.kind" class="toolbar-select" placeholder="分类类型">
+                <el-option
+                  v-for="(label, key) in taxonomyKindLabel"
+                  :key="key"
+                  :label="label"
+                  :value="key"
+                />
+              </el-select>
+              <el-input v-model="taxonomyForm.code" class="toolbar-search" placeholder="编码，如 certification" />
+              <el-input v-model="taxonomyForm.name" class="toolbar-search" placeholder="显示名称，如 认证课程" />
+              <el-input-number v-model="taxonomyForm.sort" :min="0" controls-position="right" />
+              <el-button type="primary" :loading="taxonomy.saving" @click="addTaxonomy">新增</el-button>
+              <span class="toolbar-tip">共 {{ taxonomy.items.length }} 项</span>
+            </div>
+            <div class="table-wrap">
+              <el-table v-loading="loading.taxonomy" :data="taxonomy.items" row-key="id" size="small">
+                <el-table-column prop="id" label="ID" width="60" />
+                <el-table-column label="类型" width="110">
+                  <template #default="{ row }">{{ taxonomyKindLabel[row.kind] || row.kind }}</template>
+                </el-table-column>
+                <el-table-column prop="code" label="编码" min-width="140" />
+                <el-table-column prop="name" label="名称" min-width="160" />
+                <el-table-column prop="sort" label="排序" width="70" align="right" />
+                <el-table-column label="状态" width="86">
+                  <template #default="{ row }">
+                    <el-tag :type="row.enabled ? 'success' : 'info'" size="small" effect="light">
+                      {{ row.enabled ? '启用' : '停用' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="90" fixed="right">
+                  <template #default="{ row }">
+                    <el-button
+                      link
+                      size="small"
+                      :type="row.enabled ? 'warning' : 'success'"
+                      @click="toggleTaxonomy(row)"
+                    >
+                      {{ row.enabled ? '停用' : '启用' }}
+                    </el-button>
+                  </template>
+                </el-table-column>
+                <template #empty>
+                  <div class="table-empty">暂无分类项</div>
+                </template>
+              </el-table>
+            </div>
+          </el-tab-pane>
         </el-tabs>
       </section>
 
@@ -1006,6 +1245,7 @@ onMounted(async () => {
               <el-select v-model="courseForm.course_type">
                 <el-option label="理论" value="theory" />
                 <el-option label="实训" value="practice" />
+                <el-option label="认证" value="certification" />
               </el-select>
             </el-form-item>
             <el-form-item label="等级">
@@ -1013,6 +1253,7 @@ onMounted(async () => {
                 <el-option label="初级" value="beginner" />
                 <el-option label="中级" value="intermediate" />
                 <el-option label="高级" value="advanced" />
+                <el-option label="专业共建" value="co_build" />
               </el-select>
             </el-form-item>
             <el-form-item label="技术体系">
@@ -1055,6 +1296,17 @@ onMounted(async () => {
           <el-form-item label="简介">
             <el-input v-model="courseForm.intro" type="textarea" :rows="3" maxlength="500" show-word-limit />
           </el-form-item>
+          <el-form-item label="适用对象">
+            <el-input v-model="courseForm.audience" maxlength="200" placeholder="如：具备 Python 基础的在校学生" />
+          </el-form-item>
+          <el-form-item label="先修要求">
+            <el-input
+              v-model="courseForm.prerequisite"
+              type="textarea"
+              :rows="2"
+              placeholder="如：完成 Python 基础语法与函数学习"
+            />
+          </el-form-item>
         </el-form>
         <template #footer>
           <el-button @click="courseDialog.visible = false">取消</el-button>
@@ -1074,8 +1326,9 @@ onMounted(async () => {
             <el-table-column label="时长（分）" width="100">
               <template #default="{ row }">{{ row.duration_min }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="80">
+            <el-table-column label="操作" width="150">
               <template #default="{ row }">
+                <el-button link size="small" @click="openResources(row)">资源</el-button>
                 <el-button link size="small" type="danger" @click="removeChapter(row)">删除</el-button>
               </template>
             </el-table-column>
@@ -1094,6 +1347,54 @@ onMounted(async () => {
             <el-input-number v-model="chapterForm.sort" :min="0" controls-position="right" />
             <el-button type="primary" :loading="chapterDialog.saving" @click="addChapter">添加</el-button>
           </div>
+        </div>
+      </el-dialog>
+
+      <el-dialog
+        v-model="resourceDialog.visible"
+        :title="`章节资源 · ${resourceDialog.chapterTitle}`"
+        width="720px"
+      >
+        <div v-loading="resourceDialog.loading">
+          <el-table :data="resourceDialog.items" size="small" max-height="280">
+            <el-table-column label="类型" width="80">
+              <template #default="{ row }">
+                {{ resourceTypeLabel[row.resource_type] || row.resource_type }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="title" label="标题" min-width="180" />
+            <el-table-column prop="url" label="链接" min-width="200" show-overflow-tooltip />
+            <el-table-column label="操作" width="80">
+              <template #default="{ row }">
+                <el-button link size="small" type="danger" @click="removeResource(row)">删除</el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <div class="table-empty">本章节还没有资源</div>
+            </template>
+          </el-table>
+          <div class="resource-add">
+            <el-select v-model="resourceForm.resource_type" class="toolbar-select">
+              <el-option
+                v-for="(label, key) in resourceTypeLabel"
+                :key="key"
+                :label="label"
+                :value="key"
+              />
+            </el-select>
+            <el-input v-model="resourceForm.title" placeholder="资源标题" maxlength="150" />
+            <el-input v-model="resourceForm.url" placeholder="链接（可留空）" maxlength="255" />
+            <el-input-number v-model="resourceForm.sort" :min="0" controls-position="right" />
+            <el-button type="primary" :loading="resourceDialog.saving" @click="addResource">
+              添加
+            </el-button>
+          </div>
+          <el-input
+            v-model="resourceForm.content"
+            type="textarea"
+            :rows="2"
+            placeholder="内嵌说明或代码片段（可选）"
+          />
         </div>
       </el-dialog>
     </div>
@@ -1443,5 +1744,18 @@ onMounted(async () => {
   grid-template-columns: 1fr 130px 100px auto;
   gap: 10px;
   margin-top: 14px;
+}
+
+.resource-add {
+  display: grid;
+  grid-template-columns: 110px 1fr 1fr 100px auto;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+@media (max-width: 760px) {
+  .resource-add {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

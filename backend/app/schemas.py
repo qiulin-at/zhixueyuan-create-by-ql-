@@ -96,30 +96,34 @@ class UserStatusIn(BaseModel):
 class CourseIn(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     cover: str = Field(default="", max_length=255)
-    course_type: str = Field(default="theory", pattern="^(theory|practice)$")
+    course_type: str = Field(default="theory", pattern="^(theory|practice|certification)$")
     tech_system: str = Field(default="", max_length=30)
     tech_direction: str = Field(default="", max_length=30)
-    level: str = Field(default="beginner", pattern="^(beginner|intermediate|advanced)$")
+    level: str = Field(default="beginner", pattern="^(beginner|intermediate|advanced|co_build)$")
     is_free: bool = True
     price: float = Field(default=0, ge=0, le=99999)
     teacher_id: int | None = None
     intro: str = Field(default="", max_length=500)
     description: str = ""
+    audience: str = Field(default="", max_length=200)
+    prerequisite: str = ""
     status: str = Field(default="published", pattern="^(draft|published|offline)$")
 
 
 class CourseUpdateIn(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=120)
     cover: str | None = Field(default=None, max_length=255)
-    course_type: str | None = Field(default=None, pattern="^(theory|practice)$")
+    course_type: str | None = Field(default=None, pattern="^(theory|practice|certification)$")
     tech_system: str | None = Field(default=None, max_length=30)
     tech_direction: str | None = Field(default=None, max_length=30)
-    level: str | None = Field(default=None, pattern="^(beginner|intermediate|advanced)$")
+    level: str | None = Field(default=None, pattern="^(beginner|intermediate|advanced|co_build)$")
     is_free: bool | None = None
     price: float | None = Field(default=None, ge=0, le=99999)
     teacher_id: int | None = None
     intro: str | None = Field(default=None, max_length=500)
     description: str | None = None
+    audience: str | None = Field(default=None, max_length=200)
+    prerequisite: str | None = None
     status: str | None = Field(default=None, pattern="^(draft|published|offline)$")
 
 
@@ -143,3 +147,39 @@ class OrderStatusIn(BaseModel):
 
 class CourseStatusIn(BaseModel):
     status: str = Field(pattern="^(draft|published|offline)$")
+
+class ResourceIn(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+    resource_type: str = Field(default="doc", pattern="^(video|doc|code|link|lab)$")
+    url: str = Field(default="", max_length=255)
+    content: str = Field(default="", max_length=5000)
+    sort: int = Field(default=0, ge=0)
+
+
+class ResourceUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=150)
+    resource_type: str | None = Field(default=None, pattern="^(video|doc|code|link|lab)$")
+    url: str | None = Field(default=None, max_length=255)
+    content: str | None = Field(default=None, max_length=5000)
+    sort: int | None = Field(default=None, ge=0)
+
+
+class ReviewIn(BaseModel):
+    review_status: str = Field(pattern="^(published|rejected)$")
+    comment: str = Field(default="", max_length=200)
+
+
+class TaxonomyIn(BaseModel):
+    kind: str = Field(pattern="^(course_type|tech_system|tech_direction|level)$")
+    code: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=60)
+    parent_code: str | None = Field(default=None, max_length=40)
+    sort: int = Field(default=0, ge=0)
+    enabled: bool = True
+
+
+class TaxonomyUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    parent_code: str | None = Field(default=None, max_length=40)
+    sort: int | None = Field(default=None, ge=0)
+    enabled: bool | None = None

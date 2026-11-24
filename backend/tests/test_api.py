@@ -965,3 +965,152 @@ def test_teacher_course_students_scope(client):
     assert client.get("/api/admin/teacher/courses/2/students", headers=admin).status_code == 200
     assert client.get("/api/admin/teacher/courses/999999/students", headers=admin).status_code == 404
     assert client.get("/api/admin/orders/999999", headers=admin).status_code == 404
+
+def test_enroll_free_course_idempotent(client):
+    headers = auth(login(client))
+    first = client.post("/api/courses/2/enroll", headers=headers).json()["data"]
+    assert first["enrolled"] is True
+    second = client.post("/api/courses/2/enroll", headers=headers).json()["data"]
+    assert second["enrolled"] is True
+    detail = client.get("/api/courses/2", headers=headers).json()["data"]
+    assert detail["is_enrolled"] is True
+    assert detail["can_learn"] is True
+
+
+def test_enroll_paid_course_rules(client):
+    headers = auth(login(client))
+    blocked = client.post("/api/courses/5/enroll", headers=headers)
+    assert blocked.status_code == 403
+
+    progress = client.put(
+        "/api/courses/5/progress",
+        json={"chapter_id": None, "minutes": 5},
+        headers=headers,
+    )
+    assert progress.status_code == 403
+
+
+def test_course_resources_access_and_crud(client):
+    admin = auth(login(client, "admin"))
+    created = client.post(
+        "/api/admin/courses",
+        json={"title": "TEST 资源课程", "is_free": True},
+        headers=admin,
+    ).json()["data"]
+    course_id = created["id"]
+    chapter = client.post(
+        f"/api/admin/courses/{course_id}/chapters",
+        json={"title": "第 1 章", "duration_min": 20, "sort": 1},
+        headers=admin,
+    ).json()["data"]
+    chapter_id = chapter["id"]
+    resource = client.post(
+        f"/api/admin/chapters/{chapter_id}/materials",
+        json={
+            "title": "示例代码",
+            "resource_type": "code",
+            "url": "https://example.com/demo.py",
+            "content": "print('hello')",
+            "sort": 1,
+        },
+        headers=admin,
+    ).json()["data"]
+    try:
+        assert resource["resource_type"] == "code"
+        teacher = auth(login(client, "teacher_wang"))
+        assert (
+            client.get(f"/api/admin/chapters/{chapter_id}/materials", headers=teacher).status_code
+            == 403
+        )
+
+        student = auth(login(client))
+        assert client.get(f"/api/courses/{course_id}/materials", headers=student).status_code == 403
+        client.post(f"/api/courses/{course_id}/enroll", headers=student)
+        materials = client.get(f"/api/courses/{course_id}/materials", headers=student).json()["data"]
+        assert materials["total"] == 1
+        assert materials["items"][0]["chapter_title"] == "第 1 章"
+
+        updated = client.put(
+            f"/api/admin/materials/{resource['id']}",
+            json={"title": "示例代码（更新）", "sort": 2},
+            headers=admin,
+        ).json()["data"]
+        assert updated["title"] == "示例代码（更新）"
+    finally:
+        client.delete(f"/api/admin/courses/{course_id}", headers=admin)
+
+
+def test_taxonomy_dictionary_maintenance(client):
+    data = client.get("/api/meta/taxonomy").json()["data"]
+    assert data["course_type"] and data["level"] and data["tech_system"]
+
+    admin = auth(login(client, "admin"))
+    code = f"test_kind_{uuid.uuid4().hex[:6]}"
+    created = client.post(
+        "/api/admin/taxonomy",
+        json={"kind": "course_type", "code": code, "name": "测试类型", "sort": 99},
+        headers=admin,
+    ).json()["data"]
+    try:
+        assert created["enabled"] is True
+        duplicate = client.post(
+            "/api/admin/taxonomy",
+            json={"kind": "course_type", "code": code, "name": "重复", "sort": 99},
+            headers=admin,
+        )
+        assert duplicate.status_code == 409
+        updated = client.put(
+            f"/api/admin/taxonomy/{created['id']}",
+            json={"enabled": False},
+            headers=admin,
+        ).json()["data"]
+        assert updated["enabled"] is False
+        current = client.get("/api/meta/taxonomy").json()["data"]
+        assert code not in [item["value"] for item in current["course_type"]]
+    finally:
+        client.put(f"/api/admin/taxonomy/{created['id']}", json={"enabled": True}, headers=admin)
+
+
+def test_course_review_flow(client):
+    teacher = auth(login(client, "teacher_wang"))
+    admin = auth(login(client, "admin"))
+
+    created = client.post(
+        "/api/admin/courses",
+        json={"title": "TEST 审核课程", "audience": "在校学生", "prerequisite": "Python 基础"},
+        headers=teacher,
+    ).json()["data"]
+    course_id = created["id"]
+    try:
+        detail = client.get(f"/api/admin/courses/{course_id}", headers=teacher).json()["data"]
+        assert detail["review_status"] == "pending"
+        assert detail["audience"] == "在校学生"
+        assert detail["prerequisite"] == "Python 基础"
+
+        search = client.get("/api/courses", params={"keyword": "TEST 审核课程"}).json()["data"]
+        assert search["total"] == 0
+
+        approved = client.patch(
+            f"/api/admin/courses/{course_id}/review",
+            json={"review_status": "published", "comment": "内容完整"},
+            headers=admin,
+        ).json()["data"]
+        assert approved["review_status"] == "published"
+        search = client.get("/api/courses", params={"keyword": "TEST 审核课程"}).json()["data"]
+        assert search["total"] == 1
+
+        rejected = client.patch(
+            f"/api/admin/courses/{course_id}/review",
+            json={"review_status": "rejected", "comment": "缺少大纲"},
+            headers=admin,
+        ).json()["data"]
+        assert rejected["review_status"] == "rejected"
+        search = client.get("/api/courses", params={"keyword": "TEST 审核课程"}).json()["data"]
+        assert search["total"] == 0
+
+        resubmitted = client.patch(
+            f"/api/admin/courses/{course_id}/submit-review", headers=teacher
+        ).json()["data"]
+        assert resubmitted["review_status"] == "pending"
+    finally:
+        client.delete(f"/api/admin/courses/{course_id}", headers=admin)

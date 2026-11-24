@@ -9,11 +9,7 @@ import { useUserStore } from '../stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 
-const modules = [
-  { label: '理论课程', value: 'theory' },
-  { label: '实训课程', value: 'practice' },
-  { label: '认证课程', value: 'certification' },
-]
+const modules = ref([])
 const activeModule = ref('theory')
 
 const techSystems = ref([])
@@ -48,10 +44,16 @@ const loading = ref(false)
 
 const loadMeta = async () => {
   try {
-    const data = await metaApi.filters()
+    const data = await metaApi.taxonomy()
     techSystems.value = data.tech_system || []
     techDirections.value = data.tech_direction || []
     levels.value = data.level || []
+    if (data.course_type?.length) {
+      modules.value = data.course_type.map((item) => ({ label: item.label, value: item.value }))
+      if (!modules.value.some((item) => item.value === activeModule.value)) {
+        activeModule.value = modules.value[0]?.value || 'theory'
+      }
+    }
   } catch (error) {
     techSystems.value = ['人工智能', '大数据', '云计算', '工业软件', '数通', '通信', '鸿蒙']
     levels.value = [
@@ -59,6 +61,11 @@ const loadMeta = async () => {
       { label: '中级课程', value: 'intermediate' },
       { label: '高级课程', value: 'advanced' },
       { label: '专业共建合作课程', value: 'co_build' },
+    ]
+    modules.value = [
+      { label: '理论课程', value: 'theory' },
+      { label: '实训课程', value: 'practice' },
+      { label: '认证课程', value: 'certification' },
     ]
   }
 }

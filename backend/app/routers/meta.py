@@ -1,5 +1,8 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from ..deps import get_db
+from ..models import TaxonomyTerm
 from ..utils import ok
 
 router = APIRouter(prefix="/api/meta", tags=["基础数据"])
@@ -41,3 +44,29 @@ FILTERS = {
 @router.get("/filters")
 def get_filters():
     return ok(FILTERS)
+
+@router.get("/taxonomy")
+def get_taxonomy(db: Session = Depends(get_db)):
+    rows = (
+        db.query(TaxonomyTerm)
+        .filter(TaxonomyTerm.enabled == 1)
+        .order_by(TaxonomyTerm.kind.asc(), TaxonomyTerm.sort.asc(), TaxonomyTerm.id.asc())
+        .all()
+    )
+    if not rows:
+        return ok(FILTERS)
+    grouped: dict[str, list] = {
+        "course_type": [],
+        "tech_system": [],
+        "tech_direction": [],
+        "level": [],
+    }
+    for term in rows:
+        if term.kind in ("tech_system", "tech_direction"):
+            grouped[term.kind].append(term.code)
+        elif term.kind in ("course_type", "level"):
+            grouped[term.kind].append({"label": term.name, "value": term.code})
+    for kind, values in grouped.items():
+        if not values:
+            grouped[kind] = FILTERS.get(kind, [])
+    return ok({**FILTERS, **grouped})

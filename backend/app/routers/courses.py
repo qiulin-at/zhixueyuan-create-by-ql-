@@ -5,7 +5,19 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_current_user_optional, get_db
-from ..models import Chapter, Comment, CommentLike, CommentReply, Course, Favorite, LearningRecord, User
+from ..models import (
+    Chapter,
+    Comment,
+    CommentLike,
+    CommentReply,
+    Course,
+    CourseMaterial,
+    Enrollment,
+    Favorite,
+    LearningRecord,
+    Order,
+    User,
+)
 from ..schemas import CommentIn, ProgressIn, ReplyIn
 from ..services.notifications import notify_course_comment
 from ..utils import ok, paginated
@@ -17,6 +29,76 @@ def _teacher_name(teacher: User | None) -> str:
     if teacher is None:
         return "平台讲师"
     return teacher.nickname or teacher.username
+
+
+def _active_enrollment(db: Session, user_id: int, course_id: int) -> Enrollment | None:
+    return (
+        db.query(Enrollment)
+        .filter(
+            Enrollment.user_id == user_id,
+            Enrollment.course_id == course_id,
+            Enrollment.status == "active",
+        )
+        .first()
+    )
+
+
+def _ensure_enrollment(db: Session, user: User, course: Course) -> Enrollment:
+    enrollment = (
+        db.query(Enrollment)
+        .filter(Enrollment.user_id == user.id, Enrollment.course_id == course.id)
+        .first()
+    )
+    if enrollment is not None and enrollment.status == "active":
+        return enrollment
+    if course.is_free:
+        source = "free"
+    else:
+        paid = (
+            db.query(Order)
+            .filter(
+                Order.user_id == user.id,
+                Order.course_id == course.id,
+                Order.status == "paid",
+            )
+            .first()
+        )
+        if paid is None:
+            raise HTTPException(status_code=403, detail="该课程为付费课程，请先完成报名或购买")
+        source = "order"
+    if enrollment is None:
+        enrollment = Enrollment(user_id=user.id, course_id=course.id, source=source, status="active")
+        db.add(enrollment)
+        course.study_count = (course.study_count or 0) + 1
+        db.add(course)
+    else:
+        enrollment.status = "active"
+        enrollment.source = source
+        db.add(enrollment)
+    db.commit()
+    db.refresh(enrollment)
+    return enrollment
+
+
+def _can_learn(db: Session, user: User | None, course: Course) -> bool:
+    if user is None:
+        return False
+    if user.role in ("admin", "teacher"):
+        return True
+    return _active_enrollment(db, user.id, course.id) is not None
+
+
+def _resource_item(material: CourseMaterial, chapter_title: str = "") -> dict:
+    return {
+        "id": material.id,
+        "chapter_id": material.chapter_id,
+        "chapter_title": chapter_title,
+        "title": material.title,
+        "resource_type": material.resource_type,
+        "url": material.url,
+        "content": material.content,
+        "sort": material.sort,
+    }
 
 
 def _course_item(course: Course, teacher: User | None, favorited: bool = False) -> dict:
@@ -57,7 +139,7 @@ def list_courses(
     query = (
         db.query(Course, User)
         .outerjoin(User, Course.teacher_id == User.id)
-        .filter(Course.status == "published")
+        .filter(Course.status == "published", Course.review_status == "published")
     )
     if tech_system:
         query = query.filter(Course.tech_system == tech_system)
@@ -128,10 +210,31 @@ def get_course(
     except (TypeError, ValueError):
         objectives = []
     detail = _course_item(course, teacher, favorited)
+    can_learn = _can_learn(db, current, course)
+    chapter_titles = {chapter.id: chapter.title for chapter in chapters}
+    materials = []
+    if can_learn:
+        material_rows = (
+            db.query(CourseMaterial)
+            .filter(CourseMaterial.course_id == course.id, CourseMaterial.kind == "resource")
+            .order_by(CourseMaterial.sort.asc(), CourseMaterial.id.asc())
+            .all()
+        )
+        materials = [
+            _resource_item(material, chapter_titles.get(material.chapter_id, ""))
+            for material in material_rows
+        ]
     detail.update(
         {
             "description": course.description,
             "objectives": objectives,
+            "audience": course.audience,
+            "prerequisite": course.prerequisite,
+            "review_status": course.review_status,
+            "last_updated_at": course.last_updated_at.isoformat() if course.last_updated_at else None,
+            "is_enrolled": bool(can_learn),
+            "can_learn": bool(can_learn),
+            "materials": materials,
             "teacher": {
                 "id": teacher.id,
                 "name": _teacher_name(teacher),
@@ -177,6 +280,58 @@ def toggle_favorite(
     return ok({"is_favorite": True, "course_id": course_id}, message="收藏成功")
 
 
+@router.post("/{course_id}/enroll")
+def enroll_course(
+    course_id: int,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None or course.status == "offline":
+        raise HTTPException(status_code=404, detail="课程不存在或已下架")
+    if current.role != "student":
+        return ok(
+            {"course_id": course.id, "enrolled": True, "source": "role"},
+            message="教师/管理员无需报名",
+        )
+    enrollment = _ensure_enrollment(db, current, course)
+    return ok(
+        {
+            "course_id": course.id,
+            "enrolled": enrollment.status == "active",
+            "source": enrollment.source,
+        },
+        message="报名成功",
+    )
+
+
+@router.get("/{course_id}/materials")
+def list_course_materials(
+    course_id: int,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None or course.status == "offline":
+        raise HTTPException(status_code=404, detail="课程不存在或已下架")
+    if not _can_learn(db, current, course):
+        raise HTTPException(status_code=403, detail="请先报名后再查看课程资源")
+    rows = (
+        db.query(CourseMaterial)
+        .filter(CourseMaterial.course_id == course_id, CourseMaterial.kind == "resource")
+        .order_by(CourseMaterial.sort.asc(), CourseMaterial.id.asc())
+        .all()
+    )
+    chapter_ids = {row.chapter_id for row in rows if row.chapter_id}
+    chapters = (
+        {chapter.id: chapter.title for chapter in db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all()}
+        if chapter_ids
+        else {}
+    )
+    items = [_resource_item(row, chapters.get(row.chapter_id, "")) for row in rows]
+    return ok({"items": items, "total": len(items)})
+
+
 @router.get("/{course_id}/progress")
 def get_progress(
     course_id: int,
@@ -215,6 +370,8 @@ def update_progress(
     course = db.get(Course, course_id)
     if course is None:
         raise HTTPException(status_code=404, detail="课程不存在")
+    if current.role == "student":
+        _ensure_enrollment(db, current, course)
     total_chapters = db.query(func.count(Chapter.id)).filter(Chapter.course_id == course_id).scalar() or 0
     record = (
         db.query(LearningRecord)

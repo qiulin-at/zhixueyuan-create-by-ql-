@@ -19,10 +19,10 @@
 | 工作目录 | `C:\Users\qiulin\Desktop\项目二 面向教育平台的智能体开发`（Windows + Git Bash） |
 | 后端 | FastAPI + SQLAlchemy 2.x，Python 3.14，依赖在根目录 `.venv` |
 | 前端 | Vue 3.5 + Vite 6 + Element Plus 2.8.8 + Pinia + Router + Axios + ECharts（按需）+ marked + DOMPurify 3.2.4 |
-| 数据库 | 代码模型 **17 张表**（G1 新增 `operation_logs`）；测试库与演示库均 17 张；`backend/migrate_v2.py` 可幂等补表 |
-| 接口 | **47 条路径 / 55 个操作**（`/openapi.json` 可核对；G1 新增审计日志与教师学情） |
+| 数据库 | 代码模型 **19 张表**（G1 `operation_logs`；G2 `enrollments`、`taxonomy_terms`）；测试库与演示库均 19 张；`backend/migrate_v2.py` 可幂等建表 + 补列 |
+| 接口 | **56 条路径 / 67 个操作**（`/openapi.json` 可核对；G2 新增报名、资源、审核、分类字典） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
-| 测试 | **62 passed**，`pytest-cov` 行覆盖 **91%**（1499 语句 / 135 未覆盖） |
+| 测试 | **67 passed**，`pytest-cov` 行覆盖 **90%**（1759 语句 / 181 未覆盖） |
 | 仓库 | `git` 已初始化并推送 GitHub：`https://github.com/qiulin-at/zhixueyuan-create-by-ql-.git`（public，`main`；当前与 `origin/main` 同步，D2 推送提交 `a0be17b`，**14 条功能提交**，另有文档/口径回填提交见 `git log`）；`output/` 不入公开仓库（本地交付）；历史已重写移除 `output/`，旧历史备份 `.codeartsdoer/git-backup/zhixueyun-before-rewrite.bundle` |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
@@ -33,13 +33,13 @@
 已完成的能力（不要重复开发，只需维护）：
 
 - 用户：注册、登录（JWT）、重置密码（验证码落表）、资料修改、三角色
-- 课程：三维筛选、四维排序、模糊搜索、详情、收藏、章节进度、评论（一人一课一条）、回复/楼中楼/点赞
+- 课程：三维筛选、四维排序、模糊搜索、详情、收藏、章节进度、报名（免费直报/付费校验订单）、章节资源、课程审核态、适用对象/先修要求、评论（一人一课一条）、回复/楼中楼/点赞
 - AI：多轮答疑（含课程资料 RAG Top-3 检索与引用）、学习路径、作业批改、学习报告（Mock / 在线双模式，在线失败自动降级）
 - 就业：职位筛选、详情、申请（防重复）
-- 后台：统计、用户角色与启停、课程 CRUD 与章节维护、讲师列表与指派、订单详情与状态机、职位申请列表、操作日志（G1）、教师课程学情（G1）
+- 后台：统计、用户角色与启停、课程 CRUD 与章节维护、课程审核、章节资源、分类字典、讲师列表与指派、订单详情与状态机、职位申请列表、操作日志（G1）、教师课程学情（G1）
 - 通知：收藏课程更新、下架、7 天停滞提醒、未读角标与已读、SSE 实时未读数（60s 轮询兜底）
 - 个人中心：资料、收藏、我的课程、我的订单
-- 工程：pytest 57 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
+- 工程：pytest 67 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
 - 文档：`docs/02-需求规格说明书.md`、`docs/03-系统架构设计.md`（2026-11-24，接口与表结构已对齐代码）
 - 部署：`docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf`、空库自动 seed 入口（2026-11-24 实测：三容器 healthy，8080 health 200，登录 200）
 - 交付物：`output/邱麟_答辩PPT_v2.pptx`（18 页）、`output/邱麟_项目管理4表_v2.docx`（28 表 / 8 次纪要）；一期 15 页 PPT / 19 表 Word 保留
@@ -86,7 +86,8 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 
 后续按 `docs/08` 顺序推进，一次一批：
 
-- **二期 G1：权限矩阵与操作审计**——✅ 已完成（2026-11-24）：`operation_logs` + 教师学情 + 前端双 Tab；62 passed / 91%；下一步 G2。
+- **二期 G1：权限矩阵与操作审计**——✅ 已完成（2026-11-24）：`operation_logs` + 教师学情 + 前端双 Tab；62 passed / 91%。
+- **二期 G2：课程资源与报名**——✅ 已完成（2026-11-24）：`enrollments` + 资源 + 分类字典 + 审核态；67 passed / 90%；下一步 G3。
 
 - **批次 C：Docker Compose**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 D/F/E。
 - **批次 D：RAG**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 F/E。
@@ -95,7 +96,7 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 
 ### 五、硬性约束（违反即停止）
 
-1. **不得修改或删除现有 57 个测试来"让测试通过"**；测试失败必须修业务代码
+1. **不得修改或删除现有测试来"让测试通过"**；测试失败必须修业务代码
 2. 不得改动 `.venv/`、`node_modules/`、`实验指导书(1).doc`、`.workbuddy/`
 3. 不得破坏已有接口契约与页面；**57 项测试必须持续全绿**
 4. 新增依赖需说明理由并锁定版本（Python 3.14 / Node 18.20.1）；npm 使用 npmmirror
