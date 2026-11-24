@@ -698,6 +698,163 @@ const removeKnowledge = async (item) => {
   }
 }
 
+const assignmentDialog = reactive({
+  visible: false,
+  courseId: null,
+  courseTitle: '',
+  items: [],
+  loading: false,
+  saving: false,
+})
+const assignmentForm = reactive({
+  title: '',
+  description: '',
+  language: 'python',
+  deadline: '',
+  sample_cases: '[{"args": [1, 2], "expected": 3}]',
+  hidden_cases: '[]',
+})
+const submissionDialog = reactive({
+  visible: false,
+  assignmentId: null,
+  assignmentTitle: '',
+  items: [],
+  loading: false,
+})
+const reviewInputs = reactive({})
+const reviewSaving = ref(null)
+const submissionLabel = {
+  passed: '测试通过',
+  failed: '测试未通过',
+  not_executed: '未执行',
+  timeout: '超时',
+  compile_error: '语法错误',
+  runtime_error: '运行异常',
+}
+const submissionTag = {
+  passed: 'success',
+  failed: 'warning',
+  not_executed: 'info',
+  timeout: 'danger',
+  compile_error: 'danger',
+  runtime_error: 'danger',
+}
+
+const openAssignments = async (row) => {
+  assignmentDialog.visible = true
+  assignmentDialog.courseId = row.id
+  assignmentDialog.courseTitle = row.title
+  assignmentDialog.loading = true
+  try {
+    const data = await adminApi.assignments(row.id)
+    assignmentDialog.items = data.items
+  } catch (error) {
+    assignmentDialog.items = []
+    ElMessage.error(error.message)
+  } finally {
+    assignmentDialog.loading = false
+  }
+}
+
+const parseJsonField = (raw) => {
+  try {
+    const value = JSON.parse(raw || '[]')
+    return Array.isArray(value) ? value : null
+  } catch (error) {
+    return null
+  }
+}
+
+const createAssignment = async () => {
+  if (!assignmentForm.title.trim()) {
+    ElMessage.warning('请填写作业标题')
+    return
+  }
+  const sample = parseJsonField(assignmentForm.sample_cases)
+  const hidden = parseJsonField(assignmentForm.hidden_cases)
+  if (sample === null || hidden === null) {
+    ElMessage.warning('样例与隐藏用例必须是合法 JSON 数组')
+    return
+  }
+  assignmentDialog.saving = true
+  try {
+    const item = await adminApi.createAssignment(assignmentDialog.courseId, {
+      title: assignmentForm.title.trim(),
+      description: assignmentForm.description,
+      language: assignmentForm.language,
+      deadline: assignmentForm.deadline || null,
+      sample_cases: sample,
+      hidden_cases: hidden,
+    })
+    assignmentDialog.items.push(item)
+    Object.assign(assignmentForm, {
+      title: '',
+      description: '',
+      language: 'python',
+      deadline: '',
+      sample_cases: '[{"args": [1, 2], "expected": 3}]',
+      hidden_cases: '[]',
+    })
+    ElMessage.success('作业已创建')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    assignmentDialog.saving = false
+  }
+}
+
+const removeAssignment = async (item) => {
+  try {
+    await adminApi.deleteAssignment(item.id)
+    assignmentDialog.items = assignmentDialog.items.filter((row) => row.id !== item.id)
+    ElMessage.success('作业已删除')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
+const openSubmissions = async (assignment) => {
+  submissionDialog.visible = true
+  submissionDialog.assignmentId = assignment.id
+  submissionDialog.assignmentTitle = assignment.title
+  submissionDialog.loading = true
+  try {
+    const data = await adminApi.assignmentSubmissions(assignment.id)
+    submissionDialog.items = data.items
+    data.items.forEach((item) => {
+      reviewInputs[item.id] = {
+        score: item.final_score ?? item.ai_score ?? 60,
+        comment: item.review_comment || '',
+      }
+    })
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    submissionDialog.loading = false
+  }
+}
+
+const saveReview = async (item) => {
+  const input = reviewInputs[item.id]
+  if (!input || input.score === null || input.score === undefined) {
+    ElMessage.warning('请填写复核分数')
+    return
+  }
+  reviewSaving.value = item.id
+  try {
+    const data = await adminApi.reviewSubmission(item.id, {
+      final_score: Number(input.score),
+      comment: input.comment || '',
+    })
+    Object.assign(item, data)
+    ElMessage.success('复核已保存')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    reviewSaving.value = null
+  }
+}
+
 const changeOrderStatus = async (row, status) => {
   try {
     await adminApi.updateOrderStatus(row.id, status)
@@ -872,11 +1029,12 @@ onMounted(async () => {
                 <el-table-column label="创建时间" width="132">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
                 </el-table-column>
-                <el-table-column label="操作" width="320" fixed="right">
+                <el-table-column label="操作" width="390" fixed="right">
                   <template #default="{ row }">
                     <el-button link size="small" @click="openEditCourse(row)">编辑</el-button>
                     <el-button link size="small" @click="openChapters(row)">章节</el-button>
                     <el-button link size="small" @click="openKnowledge(row)">知识库</el-button>
+                    <el-button link size="small" @click="openAssignments(row)">作业</el-button>
                     <el-button
                       v-if="isAdmin && row.review_status === 'pending'"
                       link
@@ -1520,6 +1678,130 @@ onMounted(async () => {
           </div>
         </div>
       </el-dialog>
+
+      <el-dialog
+        v-model="assignmentDialog.visible"
+        :title="`课程作业 · ${assignmentDialog.courseTitle}`"
+        width="780px"
+      >
+        <div v-loading="assignmentDialog.loading">
+          <el-table :data="assignmentDialog.items" size="small" max-height="260">
+            <el-table-column prop="title" label="标题" min-width="160" />
+            <el-table-column prop="language" label="语言" width="90" />
+            <el-table-column label="截止" width="150">
+              <template #default="{ row }">
+                {{ row.deadline ? formatTime(row.deadline) : '不限时' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="130">
+              <template #default="{ row }">
+                <el-button link size="small" @click="openSubmissions(row)">提交</el-button>
+                <el-button link size="small" type="danger" @click="removeAssignment(row)">
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <div class="table-empty">暂无作业</div>
+            </template>
+          </el-table>
+
+          <div class="assignment-form">
+            <el-input v-model="assignmentForm.title" placeholder="作业标题" maxlength="150" />
+            <el-input
+              v-model="assignmentForm.description"
+              type="textarea"
+              :rows="2"
+              placeholder="题目说明，约定入口函数为 solve(...)"
+              maxlength="5000"
+            />
+            <div class="assignment-form-row">
+              <el-select v-model="assignmentForm.language" class="toolbar-select">
+                <el-option label="Python" value="python" />
+                <el-option label="JavaScript" value="javascript" />
+                <el-option label="Java" value="java" />
+                <el-option label="C++" value="cpp" />
+              </el-select>
+              <el-date-picker
+                v-model="assignmentForm.deadline"
+                type="datetime"
+                placeholder="截止时间（可空）"
+                value-format="YYYY-MM-DDTHH:mm:ss"
+              />
+            </div>
+            <el-input
+              v-model="assignmentForm.sample_cases"
+              type="textarea"
+              :rows="2"
+              placeholder='公开样例 JSON：[{"args":[1,2],"expected":3}]'
+            />
+            <el-input
+              v-model="assignmentForm.hidden_cases"
+              type="textarea"
+              :rows="2"
+              placeholder='隐藏用例 JSON（学生不可见）'
+            />
+            <div class="assignment-actions">
+              <el-button type="primary" :loading="assignmentDialog.saving" @click="createAssignment">
+                创建作业
+              </el-button>
+              <span>仅 Python 会进入容器执行；其他语言仅做静态分析</span>
+            </div>
+          </div>
+        </div>
+      </el-dialog>
+
+      <el-dialog
+        v-model="submissionDialog.visible"
+        :title="`提交与复核 · ${submissionDialog.assignmentTitle}`"
+        width="860px"
+      >
+        <el-table v-loading="submissionDialog.loading" :data="submissionDialog.items" size="small" max-height="440">
+          <el-table-column prop="user_name" label="学生" width="110" />
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="submissionTag[row.status] || 'info'">
+                {{ submissionLabel[row.status] || row.status }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="客观" width="70" align="right">
+            <template #default="{ row }">{{ row.objective_score ?? '—' }}</template>
+          </el-table-column>
+          <el-table-column label="AI" width="60" align="right">
+            <template #default="{ row }">{{ row.ai_score ?? '—' }}</template>
+          </el-table-column>
+          <el-table-column label="最终" width="70" align="right">
+            <template #default="{ row }">{{ row.final_score ?? '—' }}</template>
+          </el-table-column>
+          <el-table-column label="复核" width="250">
+            <template #default="{ row }">
+              <div class="review-cell">
+                <el-input-number
+                  v-model="reviewInputs[row.id].score"
+                  :min="0"
+                  :max="100"
+                  size="small"
+                  controls-position="right"
+                />
+                <el-input v-model="reviewInputs[row.id].comment" size="small" placeholder="意见" />
+                <el-button
+                  link
+                  size="small"
+                  type="primary"
+                  :loading="reviewSaving === row.id"
+                  @click="saveReview(row)"
+                >
+                  保存
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <div class="table-empty">暂无提交</div>
+          </template>
+        </el-table>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -1899,6 +2181,43 @@ onMounted(async () => {
 .knowledge-actions span {
   font-size: 11.5px;
   color: var(--zx-muted-fg);
+}
+
+.assignment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.assignment-form-row {
+  display: flex;
+  gap: 8px;
+}
+
+.assignment-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.assignment-actions span {
+  font-size: 11.5px;
+  color: var(--zx-muted-fg);
+}
+
+.review-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-cell .el-input-number {
+  width: 88px;
+}
+
+.review-cell .el-input {
+  width: 92px;
 }
 
 @media (max-width: 760px) {

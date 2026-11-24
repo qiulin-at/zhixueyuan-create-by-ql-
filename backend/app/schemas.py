@@ -218,3 +218,35 @@ class KnowledgeUpdateIn(BaseModel):
     content: str | None = Field(default=None, min_length=10, max_length=10000)
     keywords: str | None = Field(default=None, max_length=200)
     chapter_id: int | None = None
+
+class AssignmentIn(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(default="", max_length=5000)
+    chapter_id: int | None = None
+    language: str = Field(default="python", pattern="^(python|javascript|java|cpp)$")
+    deadline: str | None = None
+    rubric: dict | None = None
+    sample_cases: list[dict] | None = None
+    hidden_cases: list[dict] | None = None
+    status: str = Field(default="published", pattern="^(draft|published)$")
+
+
+class AssignmentUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=150)
+    description: str | None = Field(default=None, max_length=5000)
+    chapter_id: int | None = None
+    language: str | None = Field(default=None, pattern="^(python|javascript|java|cpp)$")
+    deadline: str | None = None
+    rubric: dict | None = None
+    sample_cases: list[dict] | None = None
+    hidden_cases: list[dict] | None = None
+    status: str | None = Field(default=None, pattern="^(draft|published)$")
+
+
+class SubmissionIn(BaseModel):
+    code: str = Field(min_length=1, max_length=20000)
+
+
+class SubmissionReviewIn(BaseModel):
+    final_score: float = Field(ge=0, le=100)
+    comment: str = Field(default="", max_length=500)

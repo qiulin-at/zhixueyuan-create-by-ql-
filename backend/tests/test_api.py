@@ -1438,3 +1438,144 @@ def test_learning_path_actions_and_validation(client):
         ).status_code
         == 422
     )
+
+def test_assignment_flow_and_review(client, monkeypatch):
+    teacher = auth(login(client, "teacher_wang"))
+    student = auth(login(client))
+
+    def unavailable(code, cases, timeout=6):
+        return {
+            "status": "not_executed",
+            "available": False,
+            "reason": "Docker 未运行，未执行代码；仅做静态分析",
+            "cases": [],
+        }
+
+    monkeypatch.setattr("app.routers.assignments.sandbox.run_python_tests", unavailable)
+    created = client.post(
+        "/api/admin/courses/1/assignments",
+        json={
+            "title": "H3 测试作业",
+            "description": "实现 solve(a,b) 返回两数之和",
+            "language": "python",
+            "sample_cases": [{"args": [1, 2], "expected": 3}],
+            "hidden_cases": [{"args": [3, 4], "expected": 7}],
+        },
+        headers=teacher,
+    ).json()["data"]
+    assignment_id = created["id"]
+    try:
+        client.post("/api/courses/1/enroll", headers=student)
+        items = client.get("/api/courses/1/assignments", headers=student).json()["data"]["items"]
+        listed = next(item for item in items if item["id"] == assignment_id)
+        assert "hidden_cases" not in listed
+
+        submitted = client.post(
+            f"/api/assignments/{assignment_id}/submit",
+            json={"code": "def solve(a, b):\n    return a + b\n"},
+            headers=student,
+        ).json()["data"]
+        assert submitted["status"] == "not_executed"
+        assert submitted["objective_score"] is None
+        assert submitted["ai_score"] is not None
+        assert submitted["sandbox"]["available"] is False
+
+        my = client.get("/api/users/me/submissions", headers=student).json()["data"]
+        assert my["total"] >= 1
+
+        subs = client.get(
+            f"/api/admin/assignments/{assignment_id}/submissions", headers=teacher
+        ).json()["data"]
+        assert subs["total"] == 1
+        submission_id = subs["items"][0]["id"]
+
+        reviewed = client.patch(
+            f"/api/admin/submissions/{submission_id}/review",
+            json={"final_score": 88, "comment": "逻辑正确"},
+            headers=teacher,
+        ).json()["data"]
+        assert reviewed["final_score"] == 88
+
+        detail = client.get(f"/api/submissions/{submission_id}", headers=student).json()["data"]
+        assert detail["final_score"] == 88
+        assert detail["review_comment"] == "逻辑正确"
+    finally:
+        client.delete(f"/api/admin/assignments/{assignment_id}", headers=teacher)
+
+
+def test_assignment_sandbox_result_is_scored(client, monkeypatch):
+    teacher = auth(login(client, "teacher_wang"))
+    student = auth(login(client))
+    created = client.post(
+        "/api/admin/courses/1/assignments",
+        json={
+            "title": "H3 沙箱作业",
+            "description": "实现 solve(a,b)",
+            "language": "python",
+            "sample_cases": [{"args": [1, 2], "expected": 3}],
+        },
+        headers=teacher,
+    ).json()["data"]
+    assignment_id = created["id"]
+
+    def fake_run(code, cases, timeout=6):
+        return {
+            "status": "passed",
+            "available": True,
+            "reason": "",
+            "cases": [{"passed": True}, {"passed": True}],
+            "passed": 2,
+            "total": 2,
+        }
+
+    monkeypatch.setattr("app.routers.assignments.sandbox.run_python_tests", fake_run)
+    try:
+        client.post("/api/courses/1/enroll", headers=student)
+        submitted = client.post(
+            f"/api/assignments/{assignment_id}/submit",
+            json={"code": "def solve(a, b):\n    return a + b\n"},
+            headers=student,
+        ).json()["data"]
+        assert submitted["status"] == "passed"
+        assert submitted["objective_score"] == 100.0
+        assert submitted["sandbox"]["available"] is True
+    finally:
+        client.delete(f"/api/admin/assignments/{assignment_id}", headers=teacher)
+
+
+def test_assignment_permissions_and_deadline(client):
+    student = auth(login(client))
+    teacher = auth(login(client, "teacher_wang"))
+
+    assert client.get("/api/courses/5/assignments", headers=student).status_code == 403
+    assert (
+        client.post(
+            "/api/admin/courses/2/assignments",
+            json={"title": "越权作业"},
+            headers=teacher,
+        ).status_code
+        == 403
+    )
+
+    created = client.post(
+        "/api/admin/courses/1/assignments",
+        json={
+            "title": "H3 截止作业",
+            "description": "已截止",
+            "deadline": "2020-01-01T00:00:00",
+        },
+        headers=teacher,
+    ).json()["data"]
+    assignment_id = created["id"]
+    try:
+        client.post("/api/courses/1/enroll", headers=student)
+        assert (
+            client.post(
+                f"/api/assignments/{assignment_id}/submit",
+                json={"code": "def solve(a, b):\n    return a + b\n"},
+                headers=student,
+            ).status_code
+            == 400
+        )
+    finally:
+        client.delete(f"/api/admin/assignments/{assignment_id}", headers=teacher)

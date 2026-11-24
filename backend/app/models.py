@@ -198,6 +198,47 @@ class LearningPath(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class Assignment(Base):
+    __tablename__ = "assignments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(150))
+    description: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str] = mapped_column(String(20), default="python")
+    deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rubric_json: Mapped[str] = mapped_column(Text, default="{}")
+    sample_cases_json: Mapped[str] = mapped_column(Text, default="[]")
+    hidden_cases_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(16), default="published", index=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Submission(Base):
+    __tablename__ = "submissions"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "user_id", "attempt", name="uk_submission_attempt"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("assignments.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    code: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="not_executed", index=True)
+    test_result_json: Mapped[str] = mapped_column(Text, default="[]")
+    objective_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_feedback_json: Mapped[str] = mapped_column(Text, default="{}")
+    ai_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    final_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    review_comment: Mapped[str] = mapped_column(Text, default="")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

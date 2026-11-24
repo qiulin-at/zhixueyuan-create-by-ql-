@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from .config import settings
 from .database import Base, engine
-from .routers import admin, ai, auth, courses, jobs, meta, notifications, users
+from .routers import admin, ai, assignments, auth, courses, jobs, meta, notifications, users
 from .services.llm import llm_gateway
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
@@ -93,4 +93,5 @@ app.include_router(jobs.router)
 app.include_router(ai.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
+app.include_router(assignments.router)
 app.include_router(meta.router)

@@ -10,6 +10,12 @@ const routes = [
       { path: '', name: 'courses', component: () => import('../views/CourseListView.vue') },
       { path: 'courses/:id', name: 'course-detail', component: () => import('../views/CourseDetailView.vue') },
       {
+        path: 'courses/:id/assignments',
+        name: 'course-assignments',
+        component: () => import('../views/AssignmentView.vue'),
+        meta: { auth: true },
+      },
+      {
         path: 'ai',
         name: 'ai',
         component: () => import('../views/AiAssistantView.vue'),

@@ -411,6 +411,9 @@ onUnmounted(() => {
                   <el-icon><StarFilled /></el-icon>
                   {{ course.is_favorite ? '已收藏' : '收藏' }}
                 </el-button>
+                <el-button size="large" plain type="primary" @click="router.push(`/courses/${course.id}/assignments`)">
+                  课程作业
+                </el-button>
                 <el-button size="large" plain type="primary" @click="askAi">
                   <el-icon><ChatDotRound /></el-icon>
                   问 AI 助教

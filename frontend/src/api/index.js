@@ -85,6 +85,14 @@ export const aiApi = {
   report: (payload) => api.post('/ai/study-report', payload),
 }
 
+export const assignmentApi = {
+  list: (courseId) => api.get(`/courses/${courseId}/assignments`),
+  detail: (id) => api.get(`/assignments/${id}`),
+  submit: (id, payload) => api.post(`/assignments/${id}/submit`, payload),
+  mySubmissions: () => api.get('/users/me/submissions'),
+  submission: (id) => api.get(`/submissions/${id}`),
+}
+
 export const jobApi = {
   list: (params) => api.get('/jobs', { params }),
   detail: (id) => api.get(`/jobs/${id}`),
@@ -130,6 +138,12 @@ export const adminApi = {
   createKnowledge: (courseId, payload) => api.post(`/admin/courses/${courseId}/knowledge`, payload),
   updateKnowledge: (id, payload) => api.put(`/admin/knowledge/${id}`, payload),
   deleteKnowledge: (id) => api.delete(`/admin/knowledge/${id}`),
+  assignments: (courseId) => api.get(`/admin/courses/${courseId}/assignments`),
+  createAssignment: (courseId, payload) => api.post(`/admin/courses/${courseId}/assignments`, payload),
+  updateAssignment: (id, payload) => api.put(`/admin/assignments/${id}`, payload),
+  deleteAssignment: (id) => api.delete(`/admin/assignments/${id}`),
+  assignmentSubmissions: (id) => api.get(`/admin/assignments/${id}/submissions`),
+  reviewSubmission: (id, payload) => api.patch(`/admin/submissions/${id}/review`, payload),
 }
 
 export const notificationApi = {
