@@ -284,6 +284,81 @@ def test_notifications_require_login(client):
     assert client.post("/api/notifications/read-all").status_code == 401
 
 
+def test_notifications_stream_requires_token(client):
+    response = client.get("/api/notifications/stream")
+    assert response.status_code == 401
+    assert response.json()["code"] == 40101
+
+
+def test_notifications_stream_route_with_token(client):
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.routers.notifications import stream_notifications
+
+    token = login(client)
+    response = asyncio.run(stream_notifications(SimpleNamespace(), token))
+    assert response.media_type == "text/event-stream"
+    asyncio.run(response.body_iterator.aclose())
+
+
+def test_notification_event_stream_stops_when_disconnected(client):
+    import asyncio
+
+    from app.routers.notifications import notification_event_stream
+
+    class DisconnectedRequest:
+        async def is_disconnected(self):
+            return True
+
+    async def collect():
+        return [chunk async for chunk in notification_event_stream(DisconnectedRequest(), 4, interval=0)]
+
+    assert asyncio.run(collect()) == []
+
+
+def test_notification_event_stream_emits_events(client):
+    import asyncio
+    import json
+
+    from app.routers.notifications import notification_event_stream
+
+    class ConnectedRequest:
+        async def is_disconnected(self):
+            return False
+
+    async def collect():
+        events = []
+        async for chunk in notification_event_stream(ConnectedRequest(), 4, interval=0):
+            events.append(chunk)
+            if len(events) >= 2:
+                break
+        return events
+
+    events = asyncio.run(collect())
+    assert len(events) == 2
+    payload = json.loads(events[0][len("data: ") :].strip())
+    assert payload["unread"] >= 0
+    assert "ts" in payload
+
+
+def test_notifications_stream_rejects_invalid_token(client):
+    response = client.get("/api/notifications/stream", params={"token": "invalid-token"})
+    assert response.status_code == 401
+
+
+def test_notification_safe_generate_swallows_errors(client):
+    from types import SimpleNamespace
+
+    from app.routers.notifications import _safe_generate
+
+    class BrokenDb:
+        def rollback(self):
+            return None
+
+    _safe_generate(BrokenDb(), SimpleNamespace(id=999, username="broken"))
+
+
 def test_notification_read_flow(client):
     headers = auth(login(client, "student"))
 

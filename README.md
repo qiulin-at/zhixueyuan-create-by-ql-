@@ -19,8 +19,8 @@
 | AI 学习助手 | 智能答疑（多轮对话、课程上下文、课程资料 RAG 检索与引用）、学习路径推荐、作业批改（JSON 评分）、学习报告生成；无 Key 自动 Mock 兜底 |
 | 实习就业 | 职位分类筛选、职位/公司搜索、职位详情、申请职位 |
 | 后台管理 | 课程新建/编辑/删除与章节维护、讲师指派、账号启停、订单状态流转、用户/课程/订单/申请列表、平台统计（前端 `/admin` 页） |
-| 通知提醒 | 站内通知（收藏课程更新、学习进度停滞提醒）、顶栏未读角标、单条/全部已读 |
-| 工程质量 | pytest 接口测试 50 项（行覆盖 90%）、统一响应与错误码、全局异常处理、健康检查 |
+| 通知提醒 | 站内通知（收藏课程更新、学习进度停滞提醒）、SSE 实时未读数（60s 轮询兜底）、顶栏未读角标、单条/全部已读 |
+| 工程质量 | pytest 接口测试 56 项（行覆盖 90%）、统一响应与错误码、全局异常处理、健康检查 |
 
 ## 目录结构
 
@@ -150,6 +150,7 @@ cd backend
 | 学习报告 | `POST /api/ai/study-report` |
 | 通知列表 | `GET /api/notifications`、`GET /api/notifications/unread-count` |
 | 通知已读 | `POST /api/notifications/{id}/read`、`POST /api/notifications/read-all` |
+| 通知流 | `GET /api/notifications/stream?token=<JWT>`（SSE，15s 推送未读数） |
 | 我的订单 | `GET /api/users/me/orders` |
 | 账号启停 | `PATCH /api/admin/users/{id}/status`（仅管理员） |
 | 课程维护 | `POST/PUT/DELETE /api/admin/courses`、`POST /api/admin/courses/{id}/chapters` |
@@ -158,7 +159,7 @@ cd backend
 
 ## 后续迭代建议（对应指导书 P1/P2）
 
-1. 评论/问答社区（回复、点赞）、SSE 实时通知（当前通知为 60s 轮询）
+1. 评论/问答社区（回复、点赞）
 2. 订单支付流程（当前仅展示订单，未接支付通道）
 3. SSE 流式输出
 4. 前端容器内 npm 构建优化（当前使用宿主预构建 `dist` 规避容器内 npm 故障）

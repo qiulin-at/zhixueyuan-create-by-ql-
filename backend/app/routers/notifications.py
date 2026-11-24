@@ -1,11 +1,16 @@
+import asyncio
+import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..database import SessionLocal
 from ..deps import get_current_user, get_db
-from ..models import Notification, User
+from ..models import Notification, User, utcnow
+from ..security import decode_access_token
 from ..services.notifications import generate_notifications
 from ..utils import ok, paginated
 
@@ -41,6 +46,43 @@ def _safe_generate(db: Session, current: User) -> None:
     except Exception:
         db.rollback()
         logger.exception("生成通知失败，已忽略 user_id=%s", current.id)
+
+
+async def notification_event_stream(request: Request, user_id: int, interval: float = 15.0):
+    while True:
+        if await request.is_disconnected():
+            break
+        with SessionLocal() as db:
+            unread = _unread_count(db, user_id)
+        payload = {"unread": unread, "ts": utcnow().isoformat()}
+        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(interval)
+
+
+@router.get("/stream")
+async def stream_notifications(request: Request, token: str | None = Query(default=None)):
+    if not token:
+        raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    try:
+        user_id = int(payload.get("sub", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录") from None
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    return StreamingResponse(
+        notification_event_stream(request, user_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/unread-count")

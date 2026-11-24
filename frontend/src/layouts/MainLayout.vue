@@ -57,6 +57,8 @@ const notices = ref([])
 const noticeLoading = ref(false)
 const noticeVisible = ref(false)
 let noticeTimer = null
+let noticeStream = null
+let noticeRetryTimer = null
 
 const formatNoticeTime = (value) => {
   if (!value) return ''
@@ -80,6 +82,40 @@ const loadUnread = async () => {
     unread.value = data.unread || 0
   } catch (error) {
     // 通知属于辅助信息，失败不打扰用户
+  }
+}
+
+const stopNoticeStream = () => {
+  if (noticeStream) {
+    noticeStream.close()
+    noticeStream = null
+  }
+  if (noticeRetryTimer) {
+    clearTimeout(noticeRetryTimer)
+    noticeRetryTimer = null
+  }
+}
+
+const startNoticeStream = () => {
+  stopNoticeStream()
+  if (!userStore.isLoggedIn || typeof EventSource === 'undefined') return
+  const token = localStorage.getItem('zx_token')
+  if (!token) return
+  noticeStream = new EventSource(`/api/notifications/stream?token=${encodeURIComponent(token)}`)
+  noticeStream.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (typeof data.unread === 'number') unread.value = data.unread
+    } catch (error) {
+      // 单条事件解析失败忽略，轮询兜底
+    }
+  }
+  noticeStream.onerror = () => {
+    if (noticeStream) {
+      noticeStream.close()
+      noticeStream = null
+    }
+    noticeRetryTimer = setTimeout(startNoticeStream, 60000)
   }
 }
 
@@ -133,7 +169,9 @@ watch(
   (loggedIn) => {
     if (loggedIn) {
       loadUnread()
+      startNoticeStream()
     } else {
+      stopNoticeStream()
       unread.value = 0
       notices.value = []
       noticeVisible.value = false
@@ -146,11 +184,13 @@ onMounted(() => {
     userStore.fetchMe().catch(() => {})
     loadUnread()
   }
+  startNoticeStream()
   noticeTimer = setInterval(loadUnread, 60000)
 })
 
 onBeforeUnmount(() => {
   if (noticeTimer) clearInterval(noticeTimer)
+  stopNoticeStream()
 })
 </script>
 
