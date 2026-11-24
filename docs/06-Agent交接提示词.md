@@ -23,12 +23,12 @@
 | 接口 | **45 条路径 / 53 个操作**（`/openapi.json` 可核对；含 SSE 与社区接口） |
 | 页面 | 8 个：Login、CourseList、CourseDetail、AiAssistant、Report、JobList、Admin、Profile |
 | 测试 | **57 passed**，`pytest-cov` 行覆盖 **90%**（1424 语句 / 137 未覆盖） |
-| 仓库 | `git` 已初始化，分支 `main`，**13 条功能提交**（总提交数见 `git log`），工作区干净（仅 `docs/09-项目会议安排.md` 未跟踪）；`origin` 为占位 URL（`https://gitee.com/你的用户名/zhixueyun.git`），**未推送** |
+| 仓库 | `git` 已初始化并推送 GitHub：`https://github.com/qiulin-at/zhixueyuan-create-by-ql-.git`（public，`main`，HEAD `a0be17b`，16 条提交 / 13 条功能提交）；`output/` 不入公开仓库（本地交付）；历史已重写移除 `output/`，旧历史备份 `.codeartsdoer/git-backup/zhixueyun-before-rewrite.bundle` |
 | 容器编排 | `docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf` 已实测：三容器 healthy，8080 health 200，student 登录 200 |
 | 通知推送 | SSE `/api/notifications/stream` + EventSource，60s 轮询兜底 |
 | 学习社区 | 课程评价 + 回复/楼中楼（`parent_id`）+ 点赞（一人一次） |
 | 课程资料 | **20 条**（4 门课各 5 段）；测试库已导入，演示库/MySQL 需跑 `seed_materials.py` 补 |
-| 缺口 | 41 项中 **40 已实现 / 1 部分 / 0 缺失**（仅剩 D2；见 `docs/06-缺口清单.md` §6） |
+| 缺口 | 41 项 **41 已实现 / 0 部分 / 0 缺失**（见 `docs/06-缺口清单.md` §6）；二期 11 批为规划态，见 §11 |
 
 已完成的能力（不要重复开发，只需维护）：
 
@@ -42,13 +42,13 @@
 - 工程：pytest 57 项、覆盖率报告、`backend/run.bat`、`docs/07`、`docs/08`
 - 文档：`docs/02-需求规格说明书.md`、`docs/03-系统架构设计.md`（2026-11-24，接口与表结构已对齐代码）
 - 部署：`docker-compose.yml`、双 Dockerfile、`frontend/nginx.conf`、空库自动 seed 入口（2026-11-24 实测：三容器 healthy，8080 health 200，登录 200）
-- 交付物：`output/邱麟_答辩PPT.pptx`（15 页）、`output/邱麟_项目管理4表.docx`（19 表 / 5 次纪要）
+- 交付物：`output/邱麟_答辩PPT_v2.pptx`（18 页）、`output/邱麟_项目管理4表_v2.docx`（28 表 / 8 次纪要）；一期 15 页 PPT / 19 表 Word 保留
 
-尚未完成（剩余 1 项）：
+剩余工作：**一期 0 项**（D2 已于 2026-11-24 推送）；二期 11 批（G1–J2）为规划态，答辩后按 `docs/10` 执行。
 
 | 编号 | 内容 | 状态 | 预估 |
 |---|---|---|---|
-| D2 | 源码仓库远端推送 | 部分（本地 12 提交，本批后 13；远端占位） | 0.2 天 |
+| D2 | 源码仓库远端推送 | ✅ 已完成（2026-11-24，`a0be17b`） | — |
 
 ### 二、必读文档（按顺序，最多 20 分钟）
 
@@ -88,7 +88,7 @@ curl http://127.0.0.1:8000/api/health                               # 需先启�
 
 - **批次 C：Docker Compose**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 D/F/E。
 - **批次 D：RAG**——✅ 已完成（2026-11-24 实测），勿重复；后续进入 F/E。
-- **批次 F：交付物**——✅ D3/D4/D5/D6 均已完成（2026-11-24）；仅剩 D2 远端推送，需真实仓库地址。
+- **批次 F：交付物**——✅ D3/D4/D5/D6 v2 均已完成（2026-11-24）；D2 已于 2026-11-24 推送 GitHub（`a0be17b`），一期无剩余项。
 - **批次 E（可选）：B2/B4**——✅ B4 SSE、B2 学习社区均已完成（2026-11-24）。
 
 ### 五、硬性约束（违反即停止）
