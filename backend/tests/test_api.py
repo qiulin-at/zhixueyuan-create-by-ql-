@@ -1194,3 +1194,148 @@ def test_learning_events_reject_teacher(client):
         headers=teacher,
     )
     assert response.status_code == 403
+
+def test_rag_answer_has_citations(client):
+    headers = auth(login(client))
+    data = client.post(
+        "/api/ai/chat",
+        json={"message": "HDFS 的副本机制是怎么工作的？", "course_id": 2},
+        headers=headers,
+    ).json()["data"]
+    assert data["insufficient"] is False
+    assert data["citations"]
+    assert "HDFS" in data["citations"][0]["title"]
+    assert data["citations"][0]["score"] >= 0.06
+    assert data["message_id"]
+    assert data["mode"] == "mock"
+
+
+def test_rag_insufficient_without_material(client):
+    headers = auth(login(client))
+    data = client.post(
+        "/api/ai/chat",
+        json={"message": "红烧肉怎么做？", "course_id": 2},
+        headers=headers,
+    ).json()["data"]
+    assert data["insufficient"] is True
+    assert data["citations"] == []
+    assert data["answer"].startswith("课程资料暂未覆盖")
+
+
+def test_ai_feedback_upsert_and_ownership(client):
+    headers = auth(login(client))
+    data = client.post(
+        "/api/ai/chat",
+        json={"message": "pandas 分组聚合怎么写？", "course_id": 1},
+        headers=headers,
+    ).json()["data"]
+    message_id = data["message_id"]
+
+    first = client.post(
+        f"/api/ai/messages/{message_id}/feedback",
+        json={"helpful": True, "reason": "回答清楚"},
+        headers=headers,
+    ).json()["data"]
+    assert first["helpful"] is True
+
+    second = client.post(
+        f"/api/ai/messages/{message_id}/feedback",
+        json={"helpful": False, "reason": "示例不够完整"},
+        headers=headers,
+    ).json()["data"]
+    assert second["helpful"] is False
+    assert second["reason"] == "示例不够完整"
+
+    admin = auth(login(client, "admin"))
+    assert (
+        client.post(
+            f"/api/ai/messages/{message_id}/feedback",
+            json={"helpful": True},
+            headers=admin,
+        ).status_code
+        == 404
+    )
+
+    conversation = client.get(
+        f"/api/ai/conversations/{data['conversation_id']}", headers=headers
+    ).json()["data"]
+    user_message = next(item for item in conversation["messages"] if item["role"] == "user")
+    assert (
+        client.post(
+            f"/api/ai/messages/{user_message['id']}/feedback",
+            json={"helpful": True},
+            headers=headers,
+        ).status_code
+        == 400
+    )
+
+
+def test_knowledge_maintenance_and_retrieval(client):
+    teacher = auth(login(client, "teacher_wang"))
+    other = auth(login(client, "teacher_li"))
+    student = auth(login(client))
+
+    assert client.get("/api/admin/courses/1/knowledge", headers=other).status_code == 403
+
+    created = client.post(
+        "/api/admin/courses/1/knowledge",
+        json={
+            "title": "H1 测验资料",
+            "content": "ZebraQuantum 是智学云用于测验的专属关键词，表示数据管道的量子化调度策略。",
+            "keywords": "ZebraQuantum, 测验, 数据管道",
+        },
+        headers=teacher,
+    ).json()["data"]
+    try:
+        assert created["title"] == "H1 测验资料"
+        answer = client.post(
+            "/api/ai/chat",
+            json={"message": "ZebraQuantum 是什么？", "course_id": 1},
+            headers=student,
+        ).json()["data"]
+        assert answer["insufficient"] is False
+        assert any(item["title"] == "H1 测验资料" for item in answer["citations"])
+
+        assert (
+            client.delete(f"/api/admin/knowledge/{created['id']}", headers=other).status_code
+            == 403
+        )
+    finally:
+        assert (
+            client.delete(f"/api/admin/knowledge/{created['id']}", headers=teacher).status_code
+            == 200
+        )
+
+def test_delete_course_removes_materials(client):
+    admin = auth(login(client, "admin"))
+    created = client.post(
+        "/api/admin/courses", json={"title": "TEST 级联删除课程"}, headers=admin
+    ).json()["data"]
+    course_id = created["id"]
+    chapter = client.post(
+        f"/api/admin/courses/{course_id}/chapters",
+        json={"title": "第 1 章", "duration_min": 10, "sort": 1},
+        headers=admin,
+    ).json()["data"]
+    resource = client.post(
+        f"/api/admin/chapters/{chapter['id']}/materials",
+        json={"title": "级联资源", "resource_type": "doc"},
+        headers=admin,
+    ).json()["data"]
+    knowledge = client.post(
+        f"/api/admin/courses/{course_id}/knowledge",
+        json={"title": "级联知识", "content": "级联删除测试资料内容至少十个字"},
+        headers=admin,
+    ).json()["data"]
+
+    assert client.delete(f"/api/admin/courses/{course_id}", headers=admin).status_code == 200
+
+    from app.database import SessionLocal
+    from app.models import CourseMaterial
+
+    db = SessionLocal()
+    try:
+        assert db.get(CourseMaterial, resource["id"]) is None
+        assert db.get(CourseMaterial, knowledge["id"]) is None
+    finally:
+        db.close()

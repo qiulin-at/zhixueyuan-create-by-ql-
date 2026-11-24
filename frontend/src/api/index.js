@@ -77,6 +77,7 @@ export const aiApi = {
   chat: (payload) => api.post('/ai/chat', payload),
   conversations: () => api.get('/ai/conversations'),
   conversation: (id) => api.get(`/ai/conversations/${id}`),
+  feedback: (id, payload) => api.post(`/ai/messages/${id}/feedback`, payload),
   learningPath: (payload) => api.post('/ai/learning-path', payload),
   grade: (payload) => api.post('/ai/grade', payload),
   report: (payload) => api.post('/ai/study-report', payload),
@@ -123,6 +124,10 @@ export const adminApi = {
   taxonomy: (params) => api.get('/admin/taxonomy', { params }),
   createTaxonomy: (payload) => api.post('/admin/taxonomy', payload),
   updateTaxonomy: (id, payload) => api.put(`/admin/taxonomy/${id}`, payload),
+  knowledge: (courseId) => api.get(`/admin/courses/${courseId}/knowledge`),
+  createKnowledge: (courseId, payload) => api.post(`/admin/courses/${courseId}/knowledge`, payload),
+  updateKnowledge: (id, payload) => api.put(`/admin/knowledge/${id}`, payload),
+  deleteKnowledge: (id) => api.delete(`/admin/knowledge/${id}`),
 }
 
 export const notificationApi = {

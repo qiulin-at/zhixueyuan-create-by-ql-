@@ -110,7 +110,14 @@ const send = async (preset) => {
     }
     const data = await aiApi.chat(payload)
     mode.value = data.mode
-    messages.value.push({ role: 'assistant', content: data.answer })
+    messages.value.push({
+      role: 'assistant',
+      id: data.message_id,
+      content: data.answer,
+      insufficient: data.insufficient,
+      citations: data.citations || [],
+      feedback: null,
+    })
     if (!activeConversation.value) {
       activeConversation.value = { id: data.conversation_id, course_id: data.course_id }
       await refreshConversations()
@@ -121,6 +128,20 @@ const send = async (preset) => {
   } finally {
     sending.value = false
     await scrollToBottom()
+  }
+}
+
+const submitFeedback = async (message, helpful) => {
+  if (!message.id) return
+  try {
+    const data = await aiApi.feedback(message.id, {
+      helpful,
+      reason: helpful ? '' : '回答需要改进',
+    })
+    message.feedback = data.helpful ? 'helpful' : 'unhelpful'
+    ElMessage.success('反馈已记录')
+  } catch (error) {
+    ElMessage.error(error.message)
   }
 }
 
@@ -243,7 +264,34 @@ onMounted(async () => {
                 <div v-for="(message, index) in messages" :key="index" :class="['message', message.role]">
                   <div v-if="message.role === 'assistant'" class="ai-avatar">AI</div>
                   <div class="bubble">
+                    <div v-if="message.insufficient" class="insufficient-tag">课程资料暂未覆盖</div>
                     <div class="markdown-body" v-html="renderMarkdown(message.content)"></div>
+                    <div v-if="message.citations && message.citations.length" class="citation-list">
+                      <span
+                        v-for="(citation, cIndex) in message.citations"
+                        :key="cIndex"
+                        class="citation-item"
+                      >
+                        {{ citation.title }}
+                        <em v-if="citation.section">{{ citation.section }}</em>
+                      </span>
+                    </div>
+                    <div v-if="message.role === 'assistant' && message.id" class="feedback-row">
+                      <button
+                        type="button"
+                        :class="{ active: message.feedback === 'helpful' }"
+                        @click="submitFeedback(message, true)"
+                      >
+                        有帮助
+                      </button>
+                      <button
+                        type="button"
+                        :class="{ active: message.feedback === 'unhelpful' }"
+                        @click="submitFeedback(message, false)"
+                      >
+                        需要改进
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -660,6 +708,60 @@ onMounted(async () => {
 
 .message.user .bubble :deep(p) {
   margin: 0;
+}
+
+.insufficient-tag {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.citation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.citation-item {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.citation-item em {
+  margin-left: 4px;
+  font-style: normal;
+  color: #94a3b8;
+}
+
+.feedback-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.feedback-row button {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--zx-border);
+  background: #fff;
+  color: var(--zx-muted-fg);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.feedback-row button.active {
+  color: #0052ff;
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
 .typing {

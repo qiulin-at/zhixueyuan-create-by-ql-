@@ -169,6 +169,18 @@ class AiMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class AiFeedback(Base):
+    __tablename__ = "ai_feedbacks"
+    __table_args__ = (UniqueConstraint("message_id", "user_id", name="uk_message_user_feedback"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("ai_messages.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    helpful: Mapped[int] = mapped_column(Integer, default=1)
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

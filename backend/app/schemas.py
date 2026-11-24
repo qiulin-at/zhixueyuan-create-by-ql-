@@ -194,3 +194,21 @@ class TaxonomyUpdateIn(BaseModel):
     parent_code: str | None = Field(default=None, max_length=40)
     sort: int | None = Field(default=None, ge=0)
     enabled: bool | None = None
+
+class FeedbackIn(BaseModel):
+    helpful: bool = True
+    reason: str = Field(default="", max_length=200)
+
+
+class KnowledgeIn(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    content: str = Field(min_length=10, max_length=10000)
+    keywords: str = Field(default="", max_length=200)
+    chapter_id: int | None = None
+
+
+class KnowledgeUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=150)
+    content: str | None = Field(default=None, min_length=10, max_length=10000)
+    keywords: str | None = Field(default=None, max_length=200)
+    chapter_id: int | None = None

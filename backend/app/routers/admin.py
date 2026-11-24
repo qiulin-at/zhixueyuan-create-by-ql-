@@ -27,6 +27,8 @@ from ..schemas import (
     CourseIn,
     CourseStatusIn,
     CourseUpdateIn,
+    KnowledgeIn,
+    KnowledgeUpdateIn,
     OrderStatusIn,
     ResourceIn,
     ResourceUpdateIn,
@@ -393,6 +395,7 @@ def delete_course(
         raise HTTPException(status_code=409, detail="该课程已有订单，不能删除")
 
     db.query(Chapter).filter(Chapter.course_id == course_id).delete(synchronize_session=False)
+    db.query(CourseMaterial).filter(CourseMaterial.course_id == course_id).delete(synchronize_session=False)
     db.query(Comment).filter(Comment.course_id == course_id).delete(synchronize_session=False)
     db.query(Favorite).filter(Favorite.course_id == course_id).delete(synchronize_session=False)
     title = course.title
@@ -602,6 +605,149 @@ def delete_material(
     db.commit()
     audit.log(db, current, "resource.delete", "material", material_id, {"title": title})
     return ok({"id": material_id}, message="资源已删除")
+
+
+def _knowledge_dict(material: CourseMaterial, chapter_title: str = "") -> dict:
+    return {
+        "id": material.id,
+        "course_id": material.course_id,
+        "chapter_id": material.chapter_id,
+        "chapter_title": chapter_title,
+        "title": material.title,
+        "content": material.content,
+        "keywords": material.keywords,
+        "created_at": material.created_at.isoformat() if material.created_at else None,
+    }
+
+
+@router.get("/courses/{course_id}/knowledge")
+def list_course_knowledge(
+    course_id: int,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    rows = (
+        db.query(CourseMaterial)
+        .filter(CourseMaterial.course_id == course_id, CourseMaterial.kind == "kb")
+        .order_by(CourseMaterial.id.asc())
+        .all()
+    )
+    chapter_ids = {row.chapter_id for row in rows if row.chapter_id}
+    chapters = (
+        {chapter.id: chapter.title for chapter in db.query(Chapter).filter(Chapter.id.in_(chapter_ids)).all()}
+        if chapter_ids
+        else {}
+    )
+    items = [_knowledge_dict(row, chapters.get(row.chapter_id, "")) for row in rows]
+    return ok({"items": items, "total": len(items)})
+
+
+@router.post("/courses/{course_id}/knowledge")
+def create_course_knowledge(
+    course_id: int,
+    payload: KnowledgeIn,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    course = db.get(Course, course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    chapter = None
+    if payload.chapter_id is not None:
+        chapter = db.get(Chapter, payload.chapter_id)
+        if chapter is None or chapter.course_id != course_id:
+            raise HTTPException(status_code=400, detail="章节不属于该课程")
+    material = CourseMaterial(
+        course_id=course_id,
+        chapter_id=payload.chapter_id,
+        title=payload.title.strip(),
+        content=payload.content.strip(),
+        keywords=payload.keywords.strip(),
+        kind="kb",
+    )
+    db.add(material)
+    db.commit()
+    db.refresh(material)
+    audit.log(
+        db,
+        current,
+        "knowledge.create",
+        "material",
+        material.id,
+        {"course_id": course_id, "title": material.title},
+    )
+    return ok(
+        _knowledge_dict(material, chapter.title if chapter else ""),
+        message="知识库资料已添加",
+    )
+
+
+@router.put("/knowledge/{material_id}")
+def update_course_knowledge(
+    material_id: int,
+    payload: KnowledgeUpdateIn,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    material = db.get(CourseMaterial, material_id)
+    if material is None or material.kind != "kb":
+        raise HTTPException(status_code=404, detail="知识库资料不存在")
+    course = db.get(Course, material.course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("chapter_id") is not None:
+        chapter = db.get(Chapter, data["chapter_id"])
+        if chapter is None or chapter.course_id != material.course_id:
+            raise HTTPException(status_code=400, detail="章节不属于该课程")
+    for field, value in data.items():
+        if field in ("title", "keywords") and isinstance(value, str):
+            value = value.strip()
+        setattr(material, field, value)
+    db.add(material)
+    db.commit()
+    audit.log(
+        db,
+        current,
+        "knowledge.update",
+        "material",
+        material.id,
+        {"fields": sorted(data.keys())},
+    )
+    return ok(_knowledge_dict(material), message="知识库资料已更新")
+
+
+@router.delete("/knowledge/{material_id}")
+def delete_course_knowledge(
+    material_id: int,
+    current: User = Depends(require_role("admin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    material = db.get(CourseMaterial, material_id)
+    if material is None or material.kind != "kb":
+        raise HTTPException(status_code=404, detail="知识库资料不存在")
+    course = db.get(Course, material.course_id)
+    if course is None:
+        raise HTTPException(status_code=404, detail="课程不存在")
+    _ensure_course_access(course, current)
+    title = material.title
+    db.delete(material)
+    db.commit()
+    audit.log(
+        db,
+        current,
+        "knowledge.delete",
+        "material",
+        material_id,
+        {"course_id": course.id, "title": title},
+    )
+    return ok({"id": material_id}, message="知识库资料已删除")
 
 
 @router.get("/teachers")

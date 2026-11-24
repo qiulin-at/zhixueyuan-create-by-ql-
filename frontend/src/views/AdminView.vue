@@ -633,6 +633,71 @@ const toggleTaxonomy = async (item) => {
   }
 }
 
+const knowledgeDialog = reactive({
+  visible: false,
+  courseId: null,
+  courseTitle: '',
+  items: [],
+  chapters: [],
+  loading: false,
+  saving: false,
+})
+const knowledgeForm = reactive({ title: '', content: '', keywords: '', chapter_id: null })
+
+const openKnowledge = async (row) => {
+  knowledgeDialog.visible = true
+  knowledgeDialog.courseId = row.id
+  knowledgeDialog.courseTitle = row.title
+  knowledgeDialog.loading = true
+  try {
+    const [detail, data] = await Promise.all([
+      adminApi.courseDetail(row.id),
+      adminApi.knowledge(row.id),
+    ])
+    knowledgeDialog.chapters = detail.chapters
+    knowledgeDialog.items = data.items
+  } catch (error) {
+    knowledgeDialog.items = []
+    ElMessage.error(error.message)
+  } finally {
+    knowledgeDialog.loading = false
+  }
+}
+
+const addKnowledge = async () => {
+  if (!knowledgeForm.title.trim() || knowledgeForm.content.trim().length < 10) {
+    ElMessage.warning('请填写标题，正文至少 10 字')
+    return
+  }
+  knowledgeDialog.saving = true
+  try {
+    const item = await adminApi.createKnowledge(knowledgeDialog.courseId, {
+      ...knowledgeForm,
+      title: knowledgeForm.title.trim(),
+      content: knowledgeForm.content.trim(),
+      keywords: knowledgeForm.keywords.trim(),
+      chapter_id: knowledgeForm.chapter_id || null,
+    })
+    knowledgeDialog.items.push(item)
+    Object.assign(knowledgeForm, { title: '', content: '', keywords: '', chapter_id: null })
+    ElMessage.success('知识库资料已添加')
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    knowledgeDialog.saving = false
+  }
+}
+
+const removeKnowledge = async (item) => {
+  try {
+    await adminApi.deleteKnowledge(item.id)
+    knowledgeDialog.items = knowledgeDialog.items.filter((row) => row.id !== item.id)
+    ElMessage.success('知识库资料已删除')
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
 const changeOrderStatus = async (row, status) => {
   try {
     await adminApi.updateOrderStatus(row.id, status)
@@ -807,10 +872,11 @@ onMounted(async () => {
                 <el-table-column label="创建时间" width="132">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
                 </el-table-column>
-                <el-table-column label="操作" width="250" fixed="right">
+                <el-table-column label="操作" width="320" fixed="right">
                   <template #default="{ row }">
                     <el-button link size="small" @click="openEditCourse(row)">编辑</el-button>
                     <el-button link size="small" @click="openChapters(row)">章节</el-button>
+                    <el-button link size="small" @click="openKnowledge(row)">知识库</el-button>
                     <el-button
                       v-if="isAdmin && row.review_status === 'pending'"
                       link
@@ -1397,6 +1463,63 @@ onMounted(async () => {
           />
         </div>
       </el-dialog>
+
+      <el-dialog
+        v-model="knowledgeDialog.visible"
+        :title="`课程知识库 · ${knowledgeDialog.courseTitle}`"
+        width="760px"
+      >
+        <div v-loading="knowledgeDialog.loading">
+          <el-table :data="knowledgeDialog.items" size="small" max-height="280">
+            <el-table-column prop="title" label="标题" min-width="180" />
+            <el-table-column label="章节" width="150">
+              <template #default="{ row }">{{ row.chapter_title || '课程级' }}</template>
+            </el-table-column>
+            <el-table-column prop="keywords" label="关键词" min-width="150" show-overflow-tooltip />
+            <el-table-column label="操作" width="80">
+              <template #default="{ row }">
+                <el-button link size="small" type="danger" @click="removeKnowledge(row)">删除</el-button>
+              </template>
+            </el-table-column>
+            <template #empty>
+              <div class="table-empty">暂无知识库资料</div>
+            </template>
+          </el-table>
+          <div class="knowledge-form">
+            <el-input v-model="knowledgeForm.title" placeholder="资料标题" maxlength="150" />
+            <el-select
+              v-model="knowledgeForm.chapter_id"
+              clearable
+              placeholder="课程级（可不选章节）"
+            >
+              <el-option
+                v-for="chapter in knowledgeDialog.chapters"
+                :key="chapter.id"
+                :label="chapter.title"
+                :value="chapter.id"
+              />
+            </el-select>
+            <el-input
+              v-model="knowledgeForm.keywords"
+              placeholder="关键词，逗号分隔"
+              maxlength="200"
+            />
+          </div>
+          <el-input
+            v-model="knowledgeForm.content"
+            type="textarea"
+            :rows="4"
+            maxlength="10000"
+            placeholder="资料正文（至少 10 字），将用于答疑检索"
+          />
+          <div class="knowledge-actions">
+            <el-button type="primary" :loading="knowledgeDialog.saving" @click="addKnowledge">
+              添加资料
+            </el-button>
+            <span>仅 kind=kb 的资料参与 AI 答疑检索</span>
+          </div>
+        </div>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -1755,6 +1878,31 @@ onMounted(async () => {
 
 @media (max-width: 760px) {
   .resource-add {
+    grid-template-columns: 1fr;
+  }
+}
+
+.knowledge-form {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.knowledge-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.knowledge-actions span {
+  font-size: 11.5px;
+  color: var(--zx-muted-fg);
+}
+
+@media (max-width: 760px) {
+  .knowledge-form {
     grid-template-columns: 1fr;
   }
 }

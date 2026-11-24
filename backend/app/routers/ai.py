@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..deps import get_current_user, get_db
-from ..models import AiConversation, AiMessage, Chapter, Course, LearningRecord, User
-from ..schemas import ChatIn, GradeIn, LearningPathIn, ReportIn
+from ..models import AiConversation, AiFeedback, AiMessage, Chapter, Course, LearningRecord, User
+from ..schemas import ChatIn, FeedbackIn, GradeIn, LearningPathIn, ReportIn
 from ..services.llm import llm_gateway
 from ..services.mock_engine import mock_answer, mock_grade, mock_learning_path, mock_study_report
 from ..services.prompts import GRADE_SYSTEM, LEARNING_PATH_SYSTEM, REPORT_SYSTEM, TUTOR_SYSTEM
@@ -72,12 +72,18 @@ def chat(payload: ChatIn, current: User = Depends(get_current_user), db: Session
     course_intro = course.intro if course is not None else "平台通识课程与学习方法"
     chapter_title = _chapter_context(db, current, course)
     materials = retrieve_materials(db, course.id, payload.message, top_k=3) if course is not None else []
+    insufficient = course is not None and not materials
     system_prompt = TUTOR_SYSTEM.format(
         course_title=course_title,
         course_intro=course_intro or "暂无简介",
         chapter_title=chapter_title,
         materials=format_materials(materials),
     )
+    if insufficient:
+        system_prompt += (
+            "\n注意：本次检索到的课程资料为空。必须明确说明「课程资料暂未覆盖」，"
+            "再基于通用知识给出解释；禁止编造课程要求、评分标准或资料来源。"
+        )
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend({"role": item.role, "content": item.content} for item in history)
     answer = llm_gateway.chat(messages, temperature=0.6, max_tokens=900)
@@ -85,19 +91,84 @@ def chat(payload: ChatIn, current: User = Depends(get_current_user), db: Session
     if answer is None:
         answer = mock_answer(payload.message, course_title, chapter_title)
         mode = "mock"
-    if materials and "参考：" not in answer:
+    if insufficient:
+        prefix = "课程资料暂未覆盖该问题，以下为通用解释：\n\n"
+        if not answer.startswith(prefix):
+            answer = prefix + answer
+    elif materials and "参考：" not in answer:
         reference = format_reference_line(course_title, materials)
         if reference:
             answer = f"{answer.rstrip()}\n\n{reference}"
-    db.add(AiMessage(conversation_id=conversation.id, role="assistant", content=answer))
+    assistant = AiMessage(conversation_id=conversation.id, role="assistant", content=answer)
+    db.add(assistant)
     db.commit()
+    db.refresh(assistant)
+    citations = [
+        {
+            "material_id": item["material_id"],
+            "title": item["title"],
+            "section": item["section"],
+            "chapter_title": item["chapter_title"],
+            "snippet": item["snippet"],
+            "score": item["score"],
+        }
+        for item in materials
+    ]
     return ok(
         {
             "conversation_id": conversation.id,
             "course_id": conversation.course_id,
+            "message_id": assistant.id,
             "answer": answer,
             "mode": mode,
+            "insufficient": insufficient,
+            "citations": citations,
+            "references": format_reference_line(course_title, materials) if materials else "",
         }
+    )
+
+
+@router.post("/messages/{message_id}/feedback")
+def submit_feedback(
+    message_id: int,
+    payload: FeedbackIn,
+    current: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    message = db.get(AiMessage, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    if message.role != "assistant":
+        raise HTTPException(status_code=400, detail="只能对 AI 回答提交反馈")
+    conversation = db.get(AiConversation, message.conversation_id)
+    if conversation is None or conversation.user_id != current.id:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    feedback = (
+        db.query(AiFeedback)
+        .filter(AiFeedback.message_id == message_id, AiFeedback.user_id == current.id)
+        .first()
+    )
+    if feedback is None:
+        feedback = AiFeedback(
+            message_id=message_id,
+            user_id=current.id,
+            helpful=1 if payload.helpful else 0,
+            reason=payload.reason.strip(),
+        )
+        db.add(feedback)
+    else:
+        feedback.helpful = 1 if payload.helpful else 0
+        feedback.reason = payload.reason.strip()
+        db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return ok(
+        {
+            "message_id": message_id,
+            "helpful": bool(feedback.helpful),
+            "reason": feedback.reason,
+        },
+        message="反馈已记录",
     )
 
 
@@ -144,6 +215,17 @@ def get_conversation(
         .order_by(AiMessage.id.asc())
         .all()
     )
+    message_ids = [item.id for item in messages]
+    feedbacks = (
+        {
+            feedback.message_id: feedback
+            for feedback in db.query(AiFeedback)
+            .filter(AiFeedback.user_id == current.id, AiFeedback.message_id.in_(message_ids))
+            .all()
+        }
+        if message_ids
+        else {}
+    )
     course = db.get(Course, conversation.course_id) if conversation.course_id else None
     return ok(
         {
@@ -157,6 +239,15 @@ def get_conversation(
                     "role": item.role,
                     "content": item.content,
                     "created_at": item.created_at.isoformat() if item.created_at else None,
+                    "citations": [],
+                    "insufficient": False,
+                    "feedback": (
+                        "helpful"
+                        if feedbacks[item.id].helpful
+                        else "unhelpful"
+                    )
+                    if item.id in feedbacks
+                    else None,
                 }
                 for item in messages
             ],
