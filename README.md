@@ -4,7 +4,9 @@
 技术栈：**FastAPI + SQLAlchemy + MySQL/SQLite + Vue3 + Vite + Element Plus + OpenAI 兼容大模型（Mock 兜底）**。
 
 - 方案与文档：[docs/01-项目方案设计.md](docs/01-项目方案设计.md)
-- 需求/架构/答辩/项目管理模板：`docs/02` ~ `docs/05`
+- 需求规格：[docs/02-需求规格说明书.md](docs/02-需求规格说明书.md)
+- 架构设计：[docs/03-系统架构设计.md](docs/03-系统架构设计.md)
+- 答辩 / 项目管理模板：`docs/04` ~ `docs/05`
 - 接口文档（运行后）：<http://127.0.0.1:8000/docs>
 
 ## 已实现功能
